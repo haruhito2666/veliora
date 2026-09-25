@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Veliora adaptive icon foreground — a stylized "organization" mark:
+     three dots (departments) connected to a central node (the org). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- central node -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,48 A10,10 0 1,0 54,68 A10,10 0 1,0 54,48 Z" />
+    <!-- left dot (research) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,38 A6,6 0 1,0 26,50 A6,6 0 1,0 26,38 Z" />
+    <!-- right dot (engineering) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M82,38 A6,6 0 1,0 82,50 A6,6 0 1,0 82,38 Z" />
+    <!-- bottom dot (marketing) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,74 A6,6 0 1,0 54,86 A6,6 0 1,0 54,74 Z" />
+    <!-- connectors -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M31,44 L44,52" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M77,44 L64,52" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M54,68 L54,74" />
+</vector>

@@ -1,0 +1,80 @@
+# Operating systems
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Editors and local tools
+.idea/
+.vscode/
+*.iml
+.commandcode/
+.sofuu/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+local.properties
+
+# Go build, test, and coverage output
+backend/go/veliora-backend/
+backend/go/bin/
+backend/go/api-gateway
+backend/go/org-manager
+backend/go/*-engine
+backend/go/caspian-bridge
+backend/go/knowledge-graph
+backend/go/memory-system
+backend/go/migrate
+backend/go/wscheck
+*.test
+coverage.out
+*.prof
+
+# Python environments, caches, and coverage
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Android and Gradle
+veliora/.gradle/
+veliora/.kotlin/
+veliora/build/
+veliora/app/build/
+veliora/.idea/
+*.apk
+*.aab
+*.hprof
+.cxx/
+.externalNativeBuild/
+
+# Local planning and release-status documents
+# Kept on disk for local work; intentionally excluded from the public repository.
+docs/18-planner-design.md
+docs/29-future-roadmap.md
+docs/31-implementation-notes.md
+
+# Runtime data
+.logs/
+*.log
+*.pid
+pgdata/
+.runtime/
+*.db
+*.sqlite
+*.sqlite3
