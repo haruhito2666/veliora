@@ -26,14 +26,14 @@ See [docs/34-sofuu-native-migration-plan.md](docs/34-sofuu-native-migration-plan
 ## Current status
 
 - The legacy Go/Python alpha remains in the tree as the parity reference. It is not the supported deployment path.
-- The Sofuu backend is the active implementation target. No Sofuu entry point is committed yet; Phase 1 is the in-process HTTP gateway and storage substrate.
+- The Sofuu backend is the active implementation target. The first-pass entry point and full scripted pipeline live in `backend/sofuu/`; real `sofuu.ai` and `sofuu.agent` modes are the next step.
 - The Android alpha contains no mock/design package and no placeholder-only screens. Screens use real API data with loading, error, and empty states.
 
 ## Quick start
 
 ### Requirements
 
-- Sofuu `0.2.0-beta` or newer (`sofuu doctor` should report healthy)
+- Sofuu `0.2.0-beta` or newer, built with `sofuu.storage` support (`sofuu doctor` should report healthy)
 - A local GGUF or SafeTensors model for offline inference, or a provider API key for cloud models
 - Android Studio / JDK 17 for the Android client
 

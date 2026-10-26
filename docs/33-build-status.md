@@ -17,7 +17,7 @@
 | API | Organization, investigation, evidence, **challenges**, **debate transcript**, **votes**, report, meetings, workers, constitution, evolution, comms, WebSocket | Report `format=pdf/markdown/docx` exports |
 | Android | Org selection → home → investigation plan/evidence → report; real API data | Analysis, challenge, debate, voting screens; push notifications |
 | Operations | Native run script with readiness gate; E2E golden path through `completed`; per-service logs | Metrics/tracing, DLQ, worker scaling, auth/rate limits |
-| Sofuu In-Process Migration | Architecture blueprint & 1-to-1 substrate mapping specified (`docs/34-sofuu-native-migration-plan.md`) | Phase 1–5 implementation (`backend/sofuu/`) |
+| Sofuu In-Process Migration | First-pass backend in `backend/sofuu/`: public SDK only, scripted full pipeline, `sofuu.storage` persistence, SSE events, smoke test | Real `sofuu.ai` / `sofuu.agent` modes, Android SSE client, parity harness, on-device `libsofuu` |
 | Repository | Release docs, this status document, passing Go/Python/Android/E2E checks | Commit the pending change set |
 
 ## 1. Verification Snapshot
@@ -163,6 +163,27 @@ the store and the WebSocket stream delivering `investigation.started`.
   board-report payload shapes (`summary`/`executive_summary`,
   `dissent`/`dissenting_opinions`) and derives dissent from opposing/qualified
   debate turns only — a "support" turn is not a dissent.
+
+### M6 — Sofuu backend first pass ✅ (this working tree)
+
+- **New backend:** `backend/sofuu/` is a JS/ESM application that uses only the
+  public Sofuu SDK (`sofuu.http`, `sofuu.storage`, `sofuu.ai`, `sofuu.agent`)
+  and imports nothing from the Sofuu source tree.
+- **Persistence:** an append-only document store over `sofuu.storage`
+  (`key` / `ref` / `payload` / `created_at`); no Postgres, NATS, or Redis.
+- **Pipeline:** the same investigation spine in scripted mode — research,
+  cross-department challenge, two-round debate, synthesis, weighted vote,
+  confidence loop, board report — with `scripted`, `sofuu`, and `agent` LLM
+  modes behind one adapter.
+- **Live events:** SSE frames in the existing Android `EventFrame` shape.
+  Sofuu's HTTP server has no WebSocket upgrade; the old `/ws/...` paths return
+  `426`.
+- **Recovery:** investigations interrupted during research resume on startup.
+- **Test:** `backend/sofuu/test/smoke.sh` passes end to end against the
+  source-built Sofuu binary (5 evidence, 5 challenges, 10 turns, 5 ballots,
+  completed report).
+- **Not yet:** real provider/model verification, agent-mode parity, Android
+  SSE client, full mid-phase recovery, and a Go↔Sofuu parity harness.
 
 ## 3. Architecture As Built
 

@@ -13,7 +13,7 @@
 
 ### 1.1 The Incumbent Stack Problem
 Veliora (SocietyOS) is designed as a self-evolving autonomous organization. In its alpha implementation, achieving this required the typical fragmented multi-daemon infrastructure stack:
-- **15 Go Microservices:** `api-gateway`, `org-manager`, `investigation-engine`, `debate-engine`, `evidence-engine`, `meeting-engine`, `memory-system`, `trust-engine`, `constitution-engine`, `dna-engine`, `knowledge-graph`, `report-engine`, `evolution-engine`, `communication-engine`, `caspian-bridge`.
+- **14 Go Microservices:** `api-gateway`, `org-manager`, `investigation-engine`, `evidence-engine`, `meeting-engine`, `memory-system`, `trust-engine`, `constitution-engine`, `dna-engine`, `knowledge-graph`, `report-engine`, `evolution-engine`, `communication-engine`, `caspian-bridge`.
 - **NATS JetStream:** External messaging broker with durable streams, subjects, and consumer groups.
 - **PostgreSQL 16 + pgvector:** Dedicated database server for relational schema, JSON documents, and vector embeddings.
 - **Redis 7:** External memory store for caching and live pub/sub state.
@@ -59,16 +59,16 @@ Every piece of the incumbent infrastructure maps directly into a built-in Sofuu 
 │ Incumbent Component (Go/Py/DB)    │ Sofuu In-Process Replacement       │
 ├───────────────────────────────────┼────────────────────────────────────┤
 │ 1. Mobile API Gateway             │ `sofuu.http.createServer()`        │
-│    (Go REST + WebSocket fan-out)  │ Fast libuv HTTP/1.1 + WebSocket    │
+│    (Go REST + WebSocket fan-out)  │ Fast libuv HTTP/1.1 + SSE          │
 ├───────────────────────────────────┼────────────────────────────────────┤
-│ 2. PostgreSQL 16 + pgvector       │ `sofuu.memory` (CMA v2 Brain)      │
-│    (Relational + vector search)   │ Encrypted `.qtsq` vectors + KV DB  │
+│ 2. PostgreSQL 16 + pgvector       │ `sofuu.storage` + `sofuu.memory`   │
+│    (Relational + vector search)   │ Columnar tables + encrypted vectors│
 ├───────────────────────────────────┼────────────────────────────────────┤
-│ 3. Redis 7                        │ `sofuu.storage`                    │
+│ 3. Redis 7                        │ `sofuu.kv`                         │
 │    (Ephemeral state & cache)      │ Zero-IPC in-process Key-Value DB   │
 ├───────────────────────────────────┼────────────────────────────────────┤
-│ 4. NATS JetStream Message Bus     │ `sofuu.events` + Async Queue       │
-│    (Worker task streams & pub/sub)│ Microsecond in-process event queue │
+│ 4. NATS JetStream Message Bus     │ Event bus + `sofuu.storage` log   │
+│    (Worker task streams & pub/sub)│ In-process fan-out, durable audit │
 ├───────────────────────────────────┼────────────────────────────────────┤
 │ 5. Python Worker Daemons          │ `sofuu.agent` + 5-Shield Plugins   │
 │    (Prompt composition & tools)   │ Isolated JS agents with micro-Zod  │
@@ -97,7 +97,7 @@ In the Sofuu native architecture, Veliora runs as a clean, modular JavaScript/Ty
 |                                                                        |
 |  [HTTP & REALTIME GATEWAY]                                             |
 |  • sofuu.http.createServer (REST endpoints: /api/v1/organizations...)   |
-|  • WebSocket connection registry & live event fan-out                  |
+|  • SSE connection registry & live event fan-out                        |
 |                                                                        |
 |  [IN-PROCESS MESSAGE BUS & EVENT SCHEDULER]                            |
 |  • Durable task queue with timeout sweepers                            |
@@ -136,7 +136,7 @@ In the Sofuu native architecture, Veliora runs as a clean, modular JavaScript/Ty
      - `GET /api/v1/organizations/:id/investigations/:inv_id` -> Investigation status
      - `GET /api/v1/organizations/:id/evidence` -> Evidence records
      - `GET /api/v1/organizations/:id/reports` -> Final board reports
-     - `GET /api/v1/organizations/:id/events/ws` -> WebSocket upgrade & event stream
+     - `GET /v1/organizations/:id/events` -> SSE event stream
 2. **In-Process Persistence (`src/storage/db.js`):**
    - Use `sofuu.storage` for relational entities (Orgs, Workers, Investigations, Debates, Votes).
    - Use `sofuu.memory` for vector embeddings and semantic search on evidence.
@@ -170,7 +170,7 @@ In the Sofuu native architecture, Veliora runs as a clean, modular JavaScript/Ty
    - **Phase 3: Peer Challenge (`analyzing`):** Cross-assign each evidence item to an outside department for rigorous critique.
    - **Phase 4: Debate (`debating`):** Multi-turn Society-of-Thought debate (Opening statements $\to$ Rebuttals).
    - **Phase 5: Synthesis (`synthesizing`):** CEO synthesizes debate findings, dissenting views, and accepted claims.
-   - **Phase 6: Trust-Weighted Voting (`vote` & `confidence_chk`):** Workers cast trust-weighted ballots; evaluate confidence threshold ($\ge 0.85$ to report, $< 0.85$ triggers research loop).
+   - **Phase 6: Trust-Weighted Voting (`vote` & `confidence_chk`):** Workers cast trust-weighted ballots; evaluate confidence threshold ($\ge 0.72$ to report, $< 0.72$ triggers research loop).
    - **Phase 7: Board Report (`reporting` $\to$ `completed`):** Emit comprehensive executive report with confidence score, evidence index, and strategic recommendation.
 
 ### Phase 4: Inference Engine Wiring
@@ -237,7 +237,7 @@ The new Sofuu backend must satisfy the exact contract verified in `scripts/e2e_g
    - 2-round debate with 10 persisted turns.
    - CEO synthesis + 5 trust-weighted ballots.
    - Final board report generated with confidence $> 0.85$ and status `completed`.
-4. **WebSocket Stream:** Live event envelopes broadcasted to the Android Compose client without dropped packets.
+4. **SSE Stream:** Live event envelopes broadcast to the Android Compose client without dropped packets.
 
 ---
 
