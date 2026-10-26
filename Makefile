@@ -1,40 +1,20 @@
-# Veliora backend monorepo — Docker + Make orchestration.
+# Veliora — Sofuu backend helpers.
 
 SHELL := /bin/bash
-.PHONY: up down migrate run run-% test e2e build psql nats status
+SOFUU ?= sofuu
+.PHONY: run test doctor build-android clean
 
-# ── Stack (native, no Docker) ──────────────────────────────────────────
-up:
-	scripts/services.sh start
+run:
+	$(SOFUU) run backend/sofuu/veliora.js
 
-down:
-	scripts/services.sh stop
+doctor:
+	$(SOFUU) doctor
 
-status:
-	scripts/services.sh status
-
-psql:
-	psql -h 127.0.0.1 -U veliora -d veliora
-
-nats:
-	nats --server=nats://localhost:4222 $(filter-out $@,$(MAKECMDGOALS))
-
-# ── Migrations ───────────────────────────────────────────────────────
-migrate:
-	cd backend/go && go run ./cmd/migrate
-
-# ── Run a service ────────────────────────────────────────────────────
-# make run-api-gateway
-run-%:
-	cd backend/go && go run ./cmd/$*
-
-# ── Tests ────────────────────────────────────────────────────────────
 test:
-	cd backend/go && go test ./...
-	cd backend/workers && uv run pytest -q
+	SOFUU_BIN=$(SOFUU) bash backend/sofuu/test/smoke.sh
 
-e2e:
-	bash scripts/e2e_golden_path.sh
+build-android:
+	cd veliora && ./gradlew :app:assembleDebug
 
-build:
-	cd backend/go && go build ./...
+clean:
+	rm -rf .sofuu/veliora-store

@@ -8,25 +8,24 @@ Veliora turns a goal into an investigation run by an organization of specialized
 
 ## Backend: Sofuu
 
-Veliora's backend is a single JavaScript/TypeScript application hosted by the Sofuu runtime (`sofuu 0.2.0-beta` or newer). Sofuu provides the HTTP server, agent loops, in-process inference, encrypted memory, and structured storage in one process, so the target backend needs no Docker, PostgreSQL, NATS, Redis, or Python worker daemon.
+Veliora's backend is a single JavaScript/TypeScript application hosted by the Sofuu runtime (`sofuu 0.2.0-beta` or newer). The legacy Go/Python stack has been removed; `backend/sofuu/` is the only backend. Sofuu supplies the HTTP server, agent loops, in-process inference, encrypted memory, and structured storage in one process.
 
 | Concern | Sofuu primitive |
 |---|---|
-| REST API and live events | `sofuu.http.createServer` (HTTP and streaming responses) |
+| REST API and live events | `sofuu.http.createServer` (HTTP and Server-Sent Events) |
 | Department workers | `sofuu.agent` (`define`, `run`, `runMany`) |
 | Durable organization, investigation, task, evidence, vote, and report records | `sofuu.storage` strict-schema tables in `.qtsq` segments |
 | Institutional memory and semantic recall | `sofuu.memory` (CMA v2 / QTSQ) |
 | Local or cloud inference | `sofuu.ai` (`streamLocal` / `inferLocal` for local models, `stream` / `complete` for providers) |
 | Web research | `sofuu.web` |
 
-The Sofuu migration is in progress. The target entry point is `backend/sofuu/veliora.js`; the Go control plane and Python worker runtime under `backend/go/` and `backend/workers/` are retained only as the parity reference until the Sofuu backend replaces them.
-
-See [docs/34-sofuu-native-migration-plan.md](docs/34-sofuu-native-migration-plan.md) for the substrate mapping, phase plan, and target directory layout, and [docs/33-build-status.md](docs/33-build-status.md) for what is implemented versus still pending.
+The backend uses only the public Sofuu SDK surface; it does not import Sofuu's internal source files. See [backend/sofuu/README.md](backend/sofuu/README.md) for the implementation notes.
 
 ## Current status
 
-- The legacy Go/Python alpha remains in the tree as the parity reference. It is not the supported deployment path.
-- The Sofuu backend is the active implementation target. The first-pass entry point and full scripted pipeline live in `backend/sofuu/`; real `sofuu.ai` and `sofuu.agent` modes are the next step.
+- The Sofuu backend runs the full investigation pipeline end to end in deterministic `scripted` mode: research, cross-department challenge, two-round debate, synthesis, trust-weighted vote, confidence loop, and board report.
+- Real `sofuu.ai` and `sofuu.agent` modes are wired behind the same adapter but have not yet been validated against a provider or local model.
+- Live events use Server-Sent Events because Sofuu's HTTP server has no WebSocket upgrade. The Android client still uses WebSocket and will be switched next.
 - The Android alpha contains no mock/design package and no placeholder-only screens. Screens use real API data with loading, error, and empty states.
 
 ## Quick start
@@ -37,14 +36,18 @@ See [docs/34-sofuu-native-migration-plan.md](docs/34-sofuu-native-migration-plan
 - A local GGUF or SafeTensors model for offline inference, or a provider API key for cloud models
 - Android Studio / JDK 17 for the Android client
 
-### Backend (target)
+### Backend
 
 ```bash
 sofuu doctor
 sofuu run backend/sofuu/veliora.js
 ```
 
-The backend will serve the REST API on `http://localhost:8080` once Phase 1 of the migration lands. Until then, the legacy reference stack is still runnable; its commands are in `docs/33-build-status.md`.
+The API listens on `http://127.0.0.1:8080` by default. Run the end-to-end smoke test with:
+
+```bash
+SOFUU_BIN=/path/to/sofuu bash backend/sofuu/test/smoke.sh
+```
 
 ### Android
 
@@ -65,16 +68,16 @@ The emulator uses `http://10.0.2.2:8080` by default. Override it with:
 
 | Path | Purpose |
 |------|---------|
-| `backend/sofuu/` | Target Sofuu backend (JS/TS; migration Phase 1) |
-| `backend/go/`, `backend/workers/` | Legacy Go/Python implementation retained for parity |
+| `backend/sofuu/` | The Sofuu backend (JS/TS) |
 | `veliora/` | Native Android Compose application |
 | `templates/organizations/` | Organization templates |
-| `docs/` | Product, architecture, API, and migration documents |
-| `scripts/` | Legacy local service and E2E helpers |
+
+Design and product documents are kept in a local `docs/` folder and are not part
+of the published repository.
 
 ## Configuration
 
-The Sofuu backend will read its configuration from `backend/sofuu/veliora.json` (port, model path, provider) plus Sofuu's own `~/.sofuu/config.json`. Local inference is fully offline after the model file is provisioned; cloud inference requires a provider key.
+The backend reads `backend/sofuu/veliora.json` and supports environment overrides. Copy `.env.example` for the variable names. Local inference is fully offline after the model file is provisioned; cloud inference requires a provider key.
 
 ## License
 

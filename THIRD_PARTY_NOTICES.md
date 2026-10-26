@@ -4,10 +4,8 @@ Veliora's source is MIT licensed. The project also uses or redistributes third-p
 
 ## Runtime dependencies
 
-- Go modules are declared in `backend/go/go.mod`; each dependency retains its upstream license.
-- Python dependencies are declared in `backend/workers/pyproject.toml` and locked in `backend/workers/uv.lock`.
+- The backend runs on the [Sofuu](https://sofuu.xyz) runtime. Sofuu is MIT licensed; its QTSQ format specification has separate terms, and using QTSQ through the Sofuu runtime is free. See the Sofuu distribution for details.
 - Android dependencies are declared in `veliora/gradle/libs.versions.toml`; AndroidX, Material, Retrofit, OkHttp, and Kotlin artifacts retain their upstream licenses.
-- PostgreSQL, pgvector, NATS, Redis, and Docker images retain their respective licenses.
 
 ## Bundled fonts
 
@@ -20,4 +18,4 @@ Keep the font license/attribution with any redistribution of those files. If a f
 
 ## Generated and local files
 
-Build outputs, IDE metadata, virtual environments, logs, and local configuration are excluded from the repository by `.gitignore`; they are not part of the source distribution.
+Build outputs, IDE metadata, logs, runtime stores, and local configuration are excluded from the repository by `.gitignore`; they are not part of the source distribution.
