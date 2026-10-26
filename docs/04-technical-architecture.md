@@ -835,6 +835,42 @@ These are deferred to downstream docs or to a future revision of this one.
 
 ---
 
+## 13. Target Architecture Evolution: The Sofuu In-Process Substrate
+
+In accordance with **`docs/34-sofuu-native-migration-plan.md`**, the Veliora
+backend architecture is transitioning from the multi-daemon microservice
+cluster (15 Go services + NATS + PostgreSQL/pgvector + Redis + Python workers)
+to a **unified in-process architecture hosted on the Sofuu AI-native runtime**:
+
+```
++------------------------------------------------------------------------+
+|                          VELIORA CLIENT APP                            |
+|               (Native Android Compose / Web Dashboard)                 |
++-----------------------------------+------------------------------------+
+                                    | HTTP / WebSockets (:8080)
+                                    | (or direct JNI/C-ABI in-memory)
+                                    v
++------------------------------------------------------------------------+
+|               SOFUU STANDALONE RUNTIME PROCESS (< 5 MB)                |
+|                                                                        |
+|  • HTTP & Realtime Gateway     (sofuu.http.createServer, WebSockets)  |
+|  • In-Process Event Bus        (Lightweight durable FIFO task queue)   |
+|  • Multi-Agent Pipeline        (sofuu.agent 7-stage state machine)     |
+|  • Continuous Cognitive Memory (sofuu.memory CMA v2 / QTSQ vectors)    |
+|  • In-Process Fast Storage     (sofuu.storage zero-IPC KV database)    |
+|  • Hardware Local Inference    (sofuu.ai Metal/NEON tensor execution)  |
++------------------------------------------------------------------------+
+```
+
+**Key Architectural Benefits:**
+- **Zero External Daemons:** Eliminates Docker, PostgreSQL, NATS, and Redis.
+- **Extreme Footprint Reduction:** Idle RAM drops from ~3.2 GB to $< 65\text{ MB}$; cold startup drops from 25s to $< 4\text{ ms}$.
+- **True Mobile Independence:** Can run directly on-device inside the Android app via `libsofuu.so` completely offline with zero server dependencies.
+
+See **`docs/34-sofuu-native-migration-plan.md`** for the complete phase-by-phase implementation specifications and component mapping.
+
+---
+
 > **Architectural invariant.** If a proposed change would let a single
 > agent reproduce the system's behavior without the Event Bus, the
 > Knowledge Graph, the Meeting Engine, or the Debate Engine, that change

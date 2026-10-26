@@ -62,3 +62,5 @@
 | 28 | MVP (Hackathon) | `28-mvp-hackathon.md` |
 | 30 | Startup Vision | `30-startup-vision.md` |
 | 32 | Open-Source Release Notes | `32-open-source-release.md` |
+| 33 | Build Status & Remaining Work | `33-build-status.md` |
+| 34 | Sofuu Native Migration Plan | `34-sofuu-native-migration-plan.md` |

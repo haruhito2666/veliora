@@ -1,55 +1,52 @@
 # Veliora
 
-**The first self-evolving autonomous organization — as an open-source, local-first research project.**
+**The first self-evolving autonomous organization — an open-source, local-first research project.**
 
-Veliora turns a goal into an investigation run by an organization of specialized workers. Departments gather evidence, challenge claims, deliberate, vote, and expose the resulting state and decisions through a native Android dashboard.
+Veliora turns a goal into an investigation run by an organization of specialized departments. Departments gather evidence, challenge claims, debate, vote, and expose the resulting state and decisions through a native Android dashboard.
 
-> **Alpha / trusted-network-only:** the current release is authless. Anyone who can reach the gateway can read and modify every organization in that instance. Run it on localhost or a private network you control. It is not ready for public or multi-tenant deployment.
+> **Alpha / trusted-network-only:** the gateway is authless. Anyone who can reach it can read and modify every organization in that instance. Run it on localhost or a private network you control. It is not ready for public or multi-tenant deployment.
 
-## What is implemented
+## Backend: Sofuu
 
-- Authless local REST API with a `/health` endpoint.
-- Organization creation from the bundled Startup Society template.
-- Six departments and eight materialized workers per startup organization.
-- Constitution, DNA, trust, memory, knowledge-graph, communications, meeting, debate, evolution, investigation, evidence, and report service libraries.
-- NATS JetStream event envelopes, per-organization event streams, and WebSocket fan-out.
-- Android Compose client with organization selection, live dashboard, investigations, real evidence, reports, communications, constitution, evolution, worker/department inspection, and instance information.
-- Python worker package with prompt composition, OpenAI adapter, scripted test adapter, and Tavily/DuckDuckGo search.
+Veliora's backend is a single JavaScript/TypeScript application hosted by the Sofuu runtime (`sofuu 0.2.0-beta` or newer). Sofuu provides the HTTP server, agent loops, in-process inference, encrypted memory, and structured storage in one process, so the target backend needs no Docker, PostgreSQL, NATS, Redis, or Python worker daemon.
 
-The investigation orchestrator currently creates a deterministic fallback plan and advances the investigation to `researching`. Full worker-task dispatch and autonomous progression remain future work.
+| Concern | Sofuu primitive |
+|---|---|
+| REST API and live events | `sofuu.http.createServer` (HTTP and streaming responses) |
+| Department workers | `sofuu.agent` (`define`, `run`, `runMany`) |
+| Durable organization, investigation, task, evidence, vote, and report records | `sofuu.storage` strict-schema tables in `.qtsq` segments |
+| Institutional memory and semantic recall | `sofuu.memory` (CMA v2 / QTSQ) |
+| Local or cloud inference | `sofuu.ai` (`streamLocal` / `inferLocal` for local models, `stream` / `complete` for providers) |
+| Web research | `sofuu.web` |
 
-The Android alpha contains no mock/design package and no placeholder-only screens. Unwired pages and local-only actions were removed; empty UI states are used only when a real API has no records.
+The Sofuu migration is in progress. The target entry point is `backend/sofuu/veliora.js`; the Go control plane and Python worker runtime under `backend/go/` and `backend/workers/` are retained only as the parity reference until the Sofuu backend replaces them.
+
+See [docs/34-sofuu-native-migration-plan.md](docs/34-sofuu-native-migration-plan.md) for the substrate mapping, phase plan, and target directory layout, and [docs/33-build-status.md](docs/33-build-status.md) for what is implemented versus still pending.
+
+## Current status
+
+- The legacy Go/Python alpha remains in the tree as the parity reference. It is not the supported deployment path.
+- The Sofuu backend is the active implementation target. No Sofuu entry point is committed yet; Phase 1 is the in-process HTTP gateway and storage substrate.
+- The Android alpha contains no mock/design package and no placeholder-only screens. Screens use real API data with loading, error, and empty states.
 
 ## Quick start
 
 ### Requirements
 
-- Go 1.26+
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
-- PostgreSQL 16+ with pgvector
-- NATS JetStream
-- Redis (reserved for future infrastructure; the current control plane does not depend on it)
+- Sofuu `0.2.0-beta` or newer (`sofuu doctor` should report healthy)
+- A local GGUF or SafeTensors model for offline inference, or a provider API key for cloud models
 - Android Studio / JDK 17 for the Android client
 
-### Native development
+### Backend (target)
 
 ```bash
-cp .env.example .env
-set -a; source .env; set +a
-
-# macOS/Homebrew helper; use Docker Compose for portable infrastructure.
-make up
-make migrate
-bash scripts/run_backend.sh
+sofuu doctor
+sofuu run backend/sofuu/veliora.js
 ```
 
-The API gateway listens on `http://localhost:8080` by default.
+The backend will serve the REST API on `http://localhost:8080` once Phase 1 of the migration lands. Until then, the legacy reference stack is still runnable; its commands are in `docs/33-build-status.md`.
 
-```bash
-make test
-bash scripts/e2e_golden_path.sh
-```
+### Android
 
 Build the Android app from `veliora/`:
 
@@ -64,41 +61,20 @@ The emulator uses `http://10.0.2.2:8080` by default. Override it with:
 ./gradlew :app:assembleDebug -PVELIORA_API_BASE=http://10.0.2.2:8080
 ```
 
-### Docker infrastructure
-
-The checked-in Compose file starts PostgreSQL, NATS JetStream, and Redis. Run the Go services and migration command on the host after exporting `.env`:
-
-```bash
-docker compose up -d
-set -a; source .env; set +a
-make migrate
-bash scripts/run_backend.sh
-```
-
-Do not publish the API gateway to the internet in this mode.
-
 ## Repository map
 
 | Path | Purpose |
 |------|---------|
-| `backend/go/` | Go control plane, gateway, event bus, and engine services |
-| `backend/workers/` | Python worker runtime and task handlers |
+| `backend/sofuu/` | Target Sofuu backend (JS/TS; migration Phase 1) |
+| `backend/go/`, `backend/workers/` | Legacy Go/Python implementation retained for parity |
 | `veliora/` | Native Android Compose application |
 | `templates/organizations/` | Organization templates |
-| `docs/` | Product, architecture, API, security, and roadmap documents |
-| `scripts/` | Local service, backend, and E2E helpers |
+| `docs/` | Product, architecture, API, and migration documents |
+| `scripts/` | Legacy local service and E2E helpers |
 
 ## Configuration
 
-Copy `.env.example` and set only the integrations you need. LLM and external-channel credentials are optional for the deterministic local path. Without Caspian credentials, outbound messages remain honestly queued as `unsent`.
-
-## Contributing
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Small, focused changes with tests and documentation are preferred.
-
-## Security
-
-Read [SECURITY.md](SECURITY.md) before exposing any deployment. The current authless design is intentional for a trusted single-user instance, not a recommendation for public hosting.
+The Sofuu backend will read its configuration from `backend/sofuu/veliora.json` (port, model path, provider) plus Sofuu's own `~/.sofuu/config.json`. Local inference is fully offline after the model file is provisioned; cloud inference requires a provider key.
 
 ## License
 
