@@ -10,6 +10,27 @@ const DEFAULTS = {
   stepDelayMs: 25,
   fallbackToScripted: true,
   webSearch: false,
+  // Authentication is fail-closed: Clerk is the default. `dev` is an
+  // explicit local-test mode and still requires a bearer token.
+  authMode: "clerk",
+  appOrigins: [
+    "https://veliora-app.rikuhana.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ],
+  devUser: "user_dev_local",
+  clerk: {
+    issuer: "https://veliora-app.rikuhana.com",
+    jwksUrl: "https://veliora-app.rikuhana.com/.well-known/jwks.json",
+    authorizedParties: [
+      "https://veliora-app.rikuhana.com",
+      "http://localhost:3000",
+    ],
+    audience: "",
+    clockSkewSeconds: 5,
+    jwksCacheMs: 60 * 60 * 1000,
+    jwksTimeoutMs: 10000,
+  },
 };
 
 async function readConfigFile() {
@@ -34,10 +55,25 @@ function bool(value, fallback) {
   return value === true || value === "1" || value === "true";
 }
 
+function list(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export async function loadConfig() {
   const file = await readConfigFile();
   const env = process.env || {};
   const config = { ...DEFAULTS, ...file };
+  config.clerk = { ...DEFAULTS.clerk, ...(file.clerk || {}) };
+  config.appOrigins = list(file.appOrigins || config.appOrigins, DEFAULTS.appOrigins);
+  config.clerk.authorizedParties = list(
+    config.clerk.authorizedParties,
+    DEFAULTS.clerk.authorizedParties,
+  );
 
   if (env.VELIORA_PORT) config.port = number(env.VELIORA_PORT, config.port);
   if (env.VELIORA_HOST) config.host = env.VELIORA_HOST;
@@ -63,9 +99,44 @@ export async function loadConfig() {
     config.webSearch = bool(env.VELIORA_WEB_SEARCH, config.webSearch);
   }
 
+  if (env.VELIORA_AUTH_MODE) config.authMode = String(env.VELIORA_AUTH_MODE).toLowerCase();
+  if (env.VELIORA_APP_ORIGINS) config.appOrigins = list(env.VELIORA_APP_ORIGINS, config.appOrigins);
+  if (env.VELIORA_DEV_USER) config.devUser = String(env.VELIORA_DEV_USER);
+  if (env.CLERK_ISSUER) config.clerk.issuer = String(env.CLERK_ISSUER);
+  if (env.CLERK_JWKS_URL) config.clerk.jwksUrl = String(env.CLERK_JWKS_URL);
+  if (env.CLERK_AUTHORIZED_PARTIES) {
+    config.clerk.authorizedParties = list(
+      env.CLERK_AUTHORIZED_PARTIES,
+      config.clerk.authorizedParties,
+    );
+  }
+  if (env.CLERK_AUDIENCE) config.clerk.audience = String(env.CLERK_AUDIENCE);
+  if (env.CLERK_CLOCK_SKEW_SECONDS) {
+    config.clerk.clockSkewSeconds = number(
+      env.CLERK_CLOCK_SKEW_SECONDS,
+      config.clerk.clockSkewSeconds,
+    );
+  }
+  if (env.CLERK_JWKS_CACHE_MS) {
+    config.clerk.jwksCacheMs = number(env.CLERK_JWKS_CACHE_MS, config.clerk.jwksCacheMs);
+  }
+  if (env.CLERK_JWKS_TIMEOUT_MS) {
+    config.clerk.jwksTimeoutMs = number(env.CLERK_JWKS_TIMEOUT_MS, config.clerk.jwksTimeoutMs);
+  }
+
   config.port = Math.trunc(number(config.port, 8080));
   config.maxResearchCycles = Math.max(1, Math.trunc(number(config.maxResearchCycles, 3)));
   config.confidenceThreshold = number(config.confidenceThreshold, 0.72);
   config.stepDelayMs = Math.max(0, Math.trunc(number(config.stepDelayMs, 0)));
+  config.authMode = String(config.authMode || "clerk").toLowerCase();
+  if (!["clerk", "dev"].includes(config.authMode)) {
+    throw new Error(`VELIORA_AUTH_MODE must be "clerk" or "dev", got ${config.authMode}`);
+  }
+  config.clerk.clockSkewSeconds = Math.max(0, Math.trunc(number(config.clerk.clockSkewSeconds, 5)));
+  config.clerk.jwksCacheMs = Math.max(1, Math.trunc(number(config.clerk.jwksCacheMs, 3600000)));
+  config.clerk.jwksTimeoutMs = Math.max(1000, Math.trunc(number(config.clerk.jwksTimeoutMs, 10000)));
+  if (config.authMode === "clerk" && !config.clerk.jwksUrl) {
+    throw new Error("CLERK_JWKS_URL is required when VELIORA_AUTH_MODE=clerk");
+  }
   return config;
 }

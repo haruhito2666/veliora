@@ -2,11 +2,8 @@
 
 This is the in-process backend for Veliora, written against the **Sofuu SDK**.
 It uses only the public runtime surface (`sofuu.http`, `sofuu.storage`,
-`sofuu.ai`, `sofuu.agent`) and does not import Sofuu's internal source files.
-
-The current pass is intentionally small and runnable. The legacy Go/Python
-backend remains under `backend/go/` and `backend/workers/` as a parity
-reference until this implementation is complete.
+`sofuu.ai`, `sofuu.agent`, `sofuu.crypto`) and does not import Sofuu's
+internal source files.
 
 ## Run
 
@@ -15,12 +12,12 @@ sofuu doctor
 sofuu run backend/sofuu/veliora.js
 ```
 
-The runtime must expose `sofuu.storage`; the source build in
-`ai-native-js-runtime` does, while some older installed binaries do not. Verify
-with:
+The runtime must expose `sofuu.storage` **and** `sofuu.crypto`. The source
+build in `ai-native-js-runtime` does (after the 2026-10-26 crypto change);
+some older installed binaries do not. Verify with:
 
 ```bash
-sofuu eval 'console.log(typeof sofuu.storage, typeof sofuu.storage?.open)'
+sofuu eval 'console.log(typeof sofuu.storage, typeof sofuu.crypto?.verifyJWT)'
 ```
 
 The API listens on `http://127.0.0.1:8080` by default. Configuration lives in
@@ -37,10 +34,62 @@ The API listens on `http://127.0.0.1:8080` by default. Configuration lives in
 | `VELIORA_MAX_CYCLES` | research loop cap (default `3`) |
 | `VELIORA_STEP_DELAY_MS` | pacing delay between worker steps |
 | `VELIORA_FALLBACK_SCRIPTED` | fall back to fixtures if an SDK model call fails |
+| `VELIORA_AUTH_MODE` | `clerk` (default) or `dev` (local tests only) |
+| `VELIORA_APP_ORIGINS` | comma-separated CORS allow-list |
+| `VELIORA_DEV_USER` | identity used by `Bearer dev` in dev mode |
+| `CLERK_ISSUER` | expected `iss` claim (Frontend API URL) |
+| `CLERK_JWKS_URL` | Clerk JWKS endpoint |
+| `CLERK_AUTHORIZED_PARTIES` | comma-separated allowed `azp` origins |
+| `CLERK_AUDIENCE` | optional expected `aud` |
+| `CLERK_CLOCK_SKEW_SECONDS` | expiry/not-before tolerance (default `5`) |
+| `CLERK_JWKS_CACHE_MS` | JWKS cache lifetime (default one hour) |
+| `CLERK_JWKS_TIMEOUT_MS` | JWKS fetch timeout (default `10000`) |
 
 `scripted` mode is deterministic and needs no API key or local model. `sofuu`
 mode calls `sofuu.ai.complete`; `agent` mode defines the six department agents
 with `sofuu.agent.define` and runs them with `sofuu.agent.run`.
+
+## Authentication
+
+Every `/v1` route except `/v1/health` requires a Clerk session token:
+
+```http
+Authorization: Bearer <Clerk session JWT>
+```
+
+The gateway verifies the token locally against the Clerk JWKS with
+`sofuu.crypto.verifyJWT`. It checks the RS256 signature, `exp`, `nbf`,
+`iss` (when configured), `azp` (when authorized parties are configured), and
+`sub`. No Clerk secret key is used.
+
+- `GET /v1/me` returns the authenticated `user_id`, `session_id`, and claims.
+- Organizations are owned by the authenticated `sub`. Cross-user reads and
+  writes return `404`.
+- SSE (`/v1/organizations/{org}/events` and investigation events) also accepts
+  `?token=<jwt>` because browser `EventSource` cannot set headers. Query tokens
+  are rejected on every other route, and the stream closes when the token's
+  `exp` is reached.
+- CORS reflects only `VELIORA_APP_ORIGINS`; unknown origins get no
+  `Access-Control-Allow-Origin` header.
+
+`VELIORA_AUTH_MODE=dev` is a deliberate local/testing mode. It accepts
+`Authorization: Bearer dev:<user_id>` and logs a warning at startup. It is not
+an authless fallback: a missing token is still `401`.
+
+### Clerk setup checklist
+
+1. In Clerk, copy the Frontend API URL (or custom domain) and confirm the
+   JWKS URL is reachable:
+   `https://<frontend-api>/.well-known/jwks.json`.
+2. Set `CLERK_ISSUER` to that Frontend API URL and
+   `CLERK_AUTHORIZED_PARTIES` to the browser origin(s) that will call the API.
+3. Add the same origins to `VELIORA_APP_ORIGINS`.
+4. Have the client send the Clerk session token as a Bearer token. Clerk's
+   session cookie is not used by this API.
+
+If the JWKS endpoint is temporarily unreachable, the service starts and
+returns `503 auth_unavailable` for authenticated requests until a retry
+succeeds. A cached key set is used during transient refresh failures.
 
 ## Storage
 
@@ -55,13 +104,14 @@ created_at  insertion time
 ```
 
 Mutable records append a new row with the same key; reads take the newest row.
-No SQL, Postgres, or external daemon is involved.
+No SQL, Postgres, or external daemon is involved. Organizations carry an
+`owner_user_id`; legacy rows without one are not visible through the API.
 
 ## API surface
 
-The first pass mirrors the legacy REST contract:
-
-- `GET /health`
+- `GET /health`, `GET /v1/health` (public)
+- `GET /v1/me`
+- `GET /v1/organizations/templates`
 - `GET/POST /v1/organizations`
 - `GET /v1/organizations/{org}/status`
 - `GET /v1/organizations/{org}/constitution`
@@ -81,7 +131,19 @@ paths return an explicit `426`.
 ## Test
 
 ```bash
-bash backend/sofuu/test/smoke.sh
+# Both suites (dev-mode pipeline + real Clerk-mode JWT verification via a
+# local JWKS fixture):
+SOFUU_BIN=/path/to/sofuu make test
+
+# Individually:
+SOFUU_BIN=/path/to/sofuu bash backend/sofuu/test/smoke.sh
+SOFUU_BIN=/path/to/sofuu bash backend/sofuu/test/clerk-auth.sh
 ```
 
-Use `SOFUU_BIN=/path/to/sofuu` to test a specific runtime build.
+`clerk-auth.sh` serves a public JWKS fixture from
+`backend/sofuu/test/fixtures/` and uses a pre-signed test token; it never
+contacts Clerk. The test private key was discarded, so the token cannot be
+used against a real deployment.
+
+See [SOFUU-GAPS.md](SOFUU-GAPS.md) for the runtime gaps found while adding
+auth and the `sofuu.crypto` change that resolved them.

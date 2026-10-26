@@ -4,7 +4,7 @@
 
 Veliora turns a goal into an investigation run by an organization of specialized departments. Departments gather evidence, challenge claims, debate, vote, and expose the resulting state and decisions through a native Android dashboard.
 
-> **Alpha / trusted-network-only:** the gateway is authless. Anyone who can reach it can read and modify every organization in that instance. Run it on localhost or a private network you control. It is not ready for public or multi-tenant deployment.
+> **Alpha:** the API is authenticated with Clerk session tokens. Every `/v1` request must send `Authorization: Bearer <Clerk session JWT>`; organizations are scoped to the authenticated user. The Android client in this repository still speaks the old WebSocket/unauthenticated contract and is not yet migrated to Clerk sign-in or SSE. Use `VELIORA_AUTH_MODE=dev` only for local backend tests.
 
 ## Backend: Sofuu
 
@@ -24,6 +24,7 @@ The backend uses only the public Sofuu SDK surface; it does not import Sofuu's i
 ## Current status
 
 - The Sofuu backend runs the full investigation pipeline end to end in deterministic `scripted` mode: research, cross-department challenge, two-round debate, synthesis, trust-weighted vote, confidence loop, and board report.
+- Clerk authentication is enforced on the backend: RS256 session tokens are verified locally against the Clerk JWKS, `/v1/me` exposes the identity, and organizations are owner-scoped. A local JWKS test exercises the real verification path.
 - Real `sofuu.ai` and `sofuu.agent` modes are wired behind the same adapter but have not yet been validated against a provider or local model.
 - Live events use Server-Sent Events because Sofuu's HTTP server has no WebSocket upgrade. The Android client still uses WebSocket and will be switched next.
 - The Android alpha contains no mock/design package and no placeholder-only screens. Screens use real API data with loading, error, and empty states.
@@ -32,7 +33,8 @@ The backend uses only the public Sofuu SDK surface; it does not import Sofuu's i
 
 ### Requirements
 
-- Sofuu `0.2.0-beta` or newer, built with `sofuu.storage` support (`sofuu doctor` should report healthy)
+- Sofuu `0.2.0-beta` or newer, built with `sofuu.storage` and `sofuu.crypto` support (`sofuu doctor` should report healthy)
+- A Clerk application with the Frontend API URL and JWKS endpoint, or `VELIORA_AUTH_MODE=dev` for local tests
 - A local GGUF or SafeTensors model for offline inference, or a provider API key for cloud models
 - Android Studio / JDK 17 for the Android client
 
@@ -43,10 +45,18 @@ sofuu doctor
 sofuu run backend/sofuu/veliora.js
 ```
 
-The API listens on `http://127.0.0.1:8080` by default. Run the end-to-end smoke test with:
+The API listens on `http://127.0.0.1:8080` by default. Configure Clerk with the
+`CLERK_*` variables in `.env.example`; for a local-only run without Clerk, use:
 
 ```bash
-SOFUU_BIN=/path/to/sofuu bash backend/sofuu/test/smoke.sh
+VELIORA_AUTH_MODE=dev sofuu run backend/sofuu/veliora.js
+# then send: Authorization: Bearer dev:user_local
+```
+
+Run both the pipeline smoke test and the real Clerk verification test with:
+
+```bash
+SOFUU_BIN=/path/to/sofuu make test
 ```
 
 ### Android
@@ -76,7 +86,7 @@ Design documents and organization templates are kept in local `docs/` and
 
 ## Configuration
 
-The backend reads `backend/sofuu/veliora.json` and supports environment overrides. Copy `.env.example` for the variable names. Local inference is fully offline after the model file is provisioned; cloud inference requires a provider key.
+The backend reads `backend/sofuu/veliora.json` and supports environment overrides. Copy `.env.example` for the variable names. Clerk auth needs `CLERK_ISSUER`, `CLERK_JWKS_URL`, and `CLERK_AUTHORIZED_PARTIES`; CORS needs `VELIORA_APP_ORIGINS`. Local inference is fully offline after the model file is provisioned; cloud inference requires a provider key.
 
 ## License
 

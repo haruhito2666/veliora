@@ -9,5 +9,24 @@
   "maxResearchCycles": 3,
   "stepDelayMs": 25,
   "fallbackToScripted": true,
-  "webSearch": false
+  "webSearch": false,
+  "authMode": "clerk",
+  "appOrigins": [
+    "https://veliora-app.rikuhana.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+  ],
+  "devUser": "user_dev_local",
+  "clerk": {
+    "issuer": "https://veliora-app.rikuhana.com",
+    "jwksUrl": "https://veliora-app.rikuhana.com/.well-known/jwks.json",
+    "authorizedParties": [
+      "https://veliora-app.rikuhana.com",
+      "http://localhost:3000"
+    ],
+    "audience": "",
+    "clockSkewSeconds": 5,
+    "jwksCacheMs": 3600000,
+    "jwksTimeoutMs": 10000
+  }
 }

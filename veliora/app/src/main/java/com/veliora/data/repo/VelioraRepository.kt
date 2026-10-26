@@ -11,7 +11,7 @@ import com.veliora.data.api.OrgStatus
 import com.veliora.data.api.ReportDto
 import com.veliora.data.api.VelioraApi
 
-/** Typed repository over the authless local Veliora REST API. */
+/** Typed repository over the Veliora REST API (Clerk auth pending in the client). */
 class VelioraRepository(private val api: VelioraApi = ApiClient.api) {
 
     suspend fun organizations() = api.organizations()

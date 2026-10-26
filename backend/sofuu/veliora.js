@@ -5,6 +5,7 @@ import { LLM } from "./agents/llm.js";
 import { defineAgents } from "./agents/definitions.js";
 import { InvestigationOrchestrator } from "./orchestration/investigation.js";
 import { createGateway } from "./server/gateway.js";
+import { Authenticator } from "./auth/clerk.js";
 
 async function main() {
   if (!sofuu || !sofuu.http || typeof sofuu.http.createServer !== "function") {
@@ -15,6 +16,9 @@ async function main() {
   }
 
   const config = await loadConfig();
+  const auth = new Authenticator(config);
+  await auth.initialize();
+
   const store = new Store(config.storePath);
   const bus = new EventBus(store);
 
@@ -24,7 +28,7 @@ async function main() {
 
   const llm = new LLM(config);
   const orchestrator = new InvestigationOrchestrator({ store, bus, llm, config });
-  const gateway = createGateway({ store, bus, orchestrator, config });
+  const gateway = createGateway({ store, bus, orchestrator, config, auth });
   orchestrator.resumeActive();
 
   const server = sofuu.http.createServer((req, res) => gateway.handle(req, res));
@@ -32,11 +36,11 @@ async function main() {
 
   // Keep the runtime objects reachable. QuickJS may collect a local server
   // handle once main() returns, which closes the listening socket.
-  globalThis.__veliora = { config, store, bus, server };
+  globalThis.__veliora = { config, store, bus, auth, server };
 
   console.log(
     `veliora-sofuu listening on http://${config.host}:${config.port} ` +
-      `(mode=${config.mode}, store=${config.storePath})`,
+      `(mode=${config.mode}, auth=${config.authMode}, store=${config.storePath})`,
   );
 }
 

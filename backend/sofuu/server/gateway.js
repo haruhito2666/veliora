@@ -1,14 +1,37 @@
 import { newId, nowISO } from "../core/ids.js";
 import { STARTUP_TEMPLATE } from "../core/templates.js";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
+const BASE_CORS = {
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Max-Age": "600",
+  Vary: "Origin",
 };
 
+// The response object is a native Sofuu handle. Keep its CORS headers in a
+// WeakMap rather than adding properties to it; handlers continue to call
+// sendJSON/sendError without threading a request context through every route.
+const corsByResponse = new WeakMap();
+
+function buildCors(req, config) {
+  const allowed = config.appOrigins || [];
+  const origin = req.headers && req.headers.origin ? String(req.headers.origin) : "";
+  const cors = { ...BASE_CORS };
+  if (allowed.includes("*")) {
+    cors["Access-Control-Allow-Origin"] = "*";
+  } else if (origin && allowed.includes(origin)) {
+    cors["Access-Control-Allow-Origin"] = origin;
+  } else if (!origin && allowed.length > 0) {
+    // curl / server-to-server: no browser enforcement, but keep the header
+    // shape consistent for the smoke test.
+    cors["Access-Control-Allow-Origin"] = allowed[0];
+  }
+  return cors;
+}
+
 function sendJSON(res, status, value) {
-  res.writeHead(status, { "Content-Type": "application/json", ...CORS });
+  const cors = corsByResponse.get(res) || BASE_CORS;
+  res.writeHead(status, { "Content-Type": "application/json", ...cors });
   res.end(JSON.stringify(value));
 }
 
@@ -60,27 +83,57 @@ function bodyOf(req, res) {
   }
 }
 
-export function createGateway({ store, bus, orchestrator, config }) {
+export function createGateway({ store, bus, orchestrator, config, auth }) {
   const routes = [];
 
   function add(method, pattern, handler) {
     routes.push({ method, pattern: pattern.split("/").filter(Boolean), handler });
   }
 
+  function ownedOrg(user, orgID) {
+    const org = store.get("orgs", orgID);
+    // Deliberately 404 for another owner's organization: an authenticated
+    // user must not be able to enumerate organization ids.
+    if (!org || org.owner_user_id !== user.user_id) return null;
+    return org;
+  }
+
   async function handle(req, res) {
+    const cors = buildCors(req, config);
+    corsByResponse.set(res, cors);
     try {
       if (req.method === "OPTIONS") {
-        res.writeHead(204, CORS);
+        res.writeHead(204, cors);
         res.end();
         return;
       }
       const { pathname, query } = splitUrl(req.url);
       const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+
+      const publicRoute =
+        (req.method === "GET" && (pathname === "/health" || pathname === "/v1/health")) ||
+        pathname.startsWith("/ws/");
+      let user = null;
+      if (!publicRoute) {
+        try {
+          user = await auth.authenticate(req, {
+            // EventSource cannot send Authorization. Only the SSE routes
+            // accept a short-lived token in the query string.
+            allowQueryToken: req.method === "GET" && pathname.endsWith("/events"),
+            query,
+          });
+        } catch (error) {
+          const status = error.status || 401;
+          sendError(res, status, error.code || "unauthorized", error.message || "unauthorized");
+          return;
+        }
+      }
+
       for (const route of routes) {
         if (route.method !== req.method) continue;
         const params = matchRoute(route.pattern, parts);
         if (!params) continue;
-        await route.handler({ req, res, params, query });
+        await route.handler({ req, res, params, query, user, cors });
         return;
       }
       sendError(res, 404, "not_found", "route not found");
@@ -94,14 +147,31 @@ export function createGateway({ store, bus, orchestrator, config }) {
     }
   }
 
-  // ── health and templates ─────────────────────────────────────────────
+  // ── health and identity ──────────────────────────────────────────────
 
   add("GET", "/health", ({ res }) => {
     sendJSON(res, 200, {
       status: "ok",
-      mode: "authless-local",
       backend: "sofuu",
       version: "0.1.0",
+      auth: config.authMode,
+    });
+  });
+
+  add("GET", "/v1/health", ({ res }) => {
+    sendJSON(res, 200, {
+      status: "ok",
+      backend: "sofuu",
+      version: "0.1.0",
+      auth: config.authMode,
+    });
+  });
+
+  add("GET", "/v1/me", ({ res, user }) => {
+    sendJSON(res, 200, {
+      user_id: user.user_id,
+      session_id: user.session_id,
+      claims: user.claims,
     });
   });
 
@@ -120,18 +190,21 @@ export function createGateway({ store, bus, orchestrator, config }) {
 
   // ── organizations ────────────────────────────────────────────────────
 
-  add("GET", "/v1/organizations", ({ res }) => {
-    const data = store.list("orgs", {}).map((org) => ({
-      organization_id: org.organization_id,
-      name: org.name,
-      template: org.template,
-      state: org.state,
-      health: org.health,
-    }));
+  add("GET", "/v1/organizations", ({ res, user }) => {
+    const data = store
+      .list("orgs", {})
+      .filter((org) => org.owner_user_id === user.user_id)
+      .map((org) => ({
+        organization_id: org.organization_id,
+        name: org.name,
+        template: org.template,
+        state: org.state,
+        health: org.health,
+      }));
     sendJSON(res, 200, { data });
   });
 
-  add("POST", "/v1/organizations", ({ req, res }) => {
+  add("POST", "/v1/organizations", ({ req, res, user }) => {
     const body = bodyOf(req, res);
     if (!body) return;
     const name = String(body.name || "").trim();
@@ -144,6 +217,7 @@ export function createGateway({ store, bus, orchestrator, config }) {
     const orgID = newId("org");
     const org = {
       organization_id: orgID,
+      owner_user_id: user.user_id,
       name,
       state: "active",
       template,
@@ -215,14 +289,14 @@ export function createGateway({ store, bus, orchestrator, config }) {
     });
   });
 
-  add("GET", "/v1/organizations/:orgID", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, org);
   });
 
-  add("GET", "/v1/organizations/:orgID/status", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID/status", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigations = store.list("investigations", { ref: params.orgID });
     const meetings = store.list("meetings", { ref: params.orgID });
@@ -251,36 +325,40 @@ export function createGateway({ store, bus, orchestrator, config }) {
     });
   });
 
-  add("GET", "/v1/organizations/:orgID/constitution", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID/constitution", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, org.constitution);
   });
 
-  add("GET", "/v1/organizations/:orgID/workers", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID/workers", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, { data: org.workers });
   });
 
-  add("GET", "/v1/organizations/:orgID/communications", ({ res }) => {
+  add("GET", "/v1/organizations/:orgID/communications", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, []);
   });
 
-  add("GET", "/v1/organizations/:orgID/evolution/events", ({ res }) => {
+  add("GET", "/v1/organizations/:orgID/evolution/events", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, []);
   });
 
   // ── investigations ───────────────────────────────────────────────────
 
-  add("GET", "/v1/organizations/:orgID/investigations", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID/investigations", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, orchestrator.list(params.orgID));
   });
 
-  add("POST", "/v1/organizations/:orgID/investigations", ({ req, res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("POST", "/v1/organizations/:orgID/investigations", ({ req, res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const body = bodyOf(req, res);
     if (!body) return;
@@ -290,19 +368,25 @@ export function createGateway({ store, bus, orchestrator, config }) {
     sendJSON(res, 202, investigation);
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigation = orchestrator.get(params.orgID, params.invID);
     if (!investigation) return sendError(res, 404, "investigation_not_found", "investigation not found");
     sendJSON(res, 200, investigation);
   });
 
-  add("POST", "/v1/organizations/:orgID/investigations/:invID/cancel", ({ res, params }) => {
+  add("POST", "/v1/organizations/:orgID/investigations/:invID/cancel", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const cancelled = orchestrator.cancel(params.orgID, params.invID);
     if (!cancelled) return sendError(res, 409, "investigation_invalid_transition", "cannot cancel investigation");
     sendJSON(res, 200, { cancelled: true });
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID/evidence", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID/evidence", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigation = orchestrator.getRecord(params.invID);
     if (!investigation || investigation.organization_id !== params.orgID) {
       return sendError(res, 404, "investigation_not_found", "investigation not found");
@@ -331,7 +415,9 @@ export function createGateway({ store, bus, orchestrator, config }) {
     sendJSON(res, 200, data);
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID/challenges", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID/challenges", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigation = orchestrator.getRecord(params.invID);
     if (!investigation || investigation.organization_id !== params.orgID) {
       return sendError(res, 404, "investigation_not_found", "investigation not found");
@@ -348,7 +434,9 @@ export function createGateway({ store, bus, orchestrator, config }) {
     sendJSON(res, 200, data);
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID/debate", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID/debate", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigation = orchestrator.getRecord(params.invID);
     if (!investigation || investigation.organization_id !== params.orgID) {
       return sendError(res, 404, "investigation_not_found", "investigation not found");
@@ -358,7 +446,9 @@ export function createGateway({ store, bus, orchestrator, config }) {
     sendJSON(res, 200, debate);
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID/votes", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID/votes", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigation = orchestrator.getRecord(params.invID);
     if (!investigation || investigation.organization_id !== params.orgID) {
       return sendError(res, 404, "investigation_not_found", "investigation not found");
@@ -377,7 +467,9 @@ export function createGateway({ store, bus, orchestrator, config }) {
     sendJSON(res, 200, data);
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID/report", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID/report", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const result = orchestrator.getReport(params.orgID, params.invID);
     if (result.error === "not_found") {
       return sendError(res, 404, "investigation_not_found", "investigation not found");
@@ -390,13 +482,15 @@ export function createGateway({ store, bus, orchestrator, config }) {
 
   // ── meetings ─────────────────────────────────────────────────────────
 
-  add("GET", "/v1/organizations/:orgID/meetings", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID/meetings", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     sendJSON(res, 200, orchestrator.meetings(params.orgID));
   });
 
-  add("GET", "/v1/organizations/:orgID/meetings/:mtgID", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/meetings/:mtgID", ({ res, params, user }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const meeting = orchestrator.getMeeting(params.orgID, params.mtgID);
     if (!meeting || meeting.organization_id !== params.orgID) {
       return sendError(res, 404, "meeting_not_found", "meeting not found");
@@ -406,18 +500,20 @@ export function createGateway({ store, bus, orchestrator, config }) {
 
   // ── live streams (SSE; Sofuu has no WebSocket server) ───────────────
 
-  add("GET", "/v1/organizations/:orgID/events", ({ res, params }) => {
-    const org = store.get("orgs", params.orgID);
+  add("GET", "/v1/organizations/:orgID/events", ({ res, params, user, cors }) => {
+    const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-    bus.subscribe(params.orgID, null, res);
+    bus.subscribe(params.orgID, null, res, cors, user.expires_at);
   });
 
-  add("GET", "/v1/organizations/:orgID/investigations/:invID/events", ({ res, params }) => {
+  add("GET", "/v1/organizations/:orgID/investigations/:invID/events", ({ res, params, user, cors }) => {
+    const org = ownedOrg(user, params.orgID);
+    if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
     const investigation = orchestrator.getRecord(params.invID);
     if (!investigation || investigation.organization_id !== params.orgID) {
       return sendError(res, 404, "investigation_not_found", "investigation not found");
     }
-    bus.subscribe(params.orgID, params.invID, res);
+    bus.subscribe(params.orgID, params.invID, res, cors, user.expires_at);
   });
 
   // A compatibility landing point for clients still pointing at the old WS

@@ -31,8 +31,12 @@ data class EventFrame(
 )
 
 /**
- * Single multiplexed WebSocket per org (doc 16 §16.8). Auto-reconnects with
- * a monotonic sequence and re-subscribes; emits parsed [EventFrame]s.
+ * Legacy WebSocket transport.
+ *
+ * The Sofuu backend no longer exposes a WebSocket upgrade; live events are
+ * served as SSE at GET /v1/organizations/{orgId}/events. This client is kept
+ * until the Android migration lands, then it must use SSE with the Clerk
+ * bearer token. The backend's /ws compatibility route returns HTTP 426.
  */
 class RealtimeClient(
     private val orgId: String,

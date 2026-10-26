@@ -17,23 +17,38 @@ export class EventBus {
     this.heartbeat = setInterval(() => this._heartbeat(), 15000);
   }
 
-  subscribe(orgID, invID, res) {
+  subscribe(orgID, invID, res, cors = {}, expiresAt = 0) {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
       "X-Accel-Buffering": "no",
-      "Access-Control-Allow-Origin": "*",
+      ...cors,
     });
     res.write("retry: 3000\n\n");
     res.write(`: connected ${nowISO()}\n\n`);
 
-    const client = { orgID, invID: invID || null, res };
+    const client = { orgID, invID: invID || null, res, expiryTimer: null };
+    const delay = Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt - Date.now() : 0;
+    // setTimeout cannot represent delays beyond 2^31-1 ms. Real Clerk tokens
+    // are short-lived; a longer-lived synthetic token simply skips the timer.
+    if (delay > 0 && delay <= 0x7fffffff) {
+      // An SSE connection must not outlive the token that opened it.
+      client.expiryTimer = setTimeout(() => {
+        try {
+          res.end();
+        } catch (_) {
+          // Already closed.
+        }
+        this.unsubscribe(client);
+      }, delay);
+    }
     this.clients.add(client);
     return client;
   }
 
   unsubscribe(client) {
+    if (client && client.expiryTimer) clearTimeout(client.expiryTimer);
     this.clients.delete(client);
   }
 
@@ -75,7 +90,7 @@ export class EventBus {
       try {
         client.res.write(wire);
       } catch (_) {
-        this.clients.delete(client);
+        this.unsubscribe(client);
       }
     }
     return envelope;
@@ -86,7 +101,7 @@ export class EventBus {
       try {
         client.res.write(`: heartbeat ${nowISO()}\n\n`);
       } catch (_) {
-        this.clients.delete(client);
+        this.unsubscribe(client);
       }
     }
   }
@@ -94,6 +109,7 @@ export class EventBus {
   close() {
     clearInterval(this.heartbeat);
     for (const client of Array.from(this.clients)) {
+      if (client.expiryTimer) clearTimeout(client.expiryTimer);
       try {
         client.res.end();
       } catch (_) {

@@ -9,7 +9,13 @@ import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
 
-/** Builds the shared authless OkHttp client and Retrofit instance. */
+/**
+ * Builds the shared OkHttp client and Retrofit instance.
+ *
+ * The backend now requires a Clerk session token on every /v1 request. This
+ * client predates the Clerk/SSE migration and does not attach one yet; the
+ * migration will add an auth interceptor here.
+ */
 object ApiClient {
 
     private val json = Json {
