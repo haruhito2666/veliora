@@ -70,10 +70,9 @@ The emulator uses `http://10.0.2.2:8080` by default. Override it with:
 |------|---------|
 | `backend/sofuu/` | The Sofuu backend (JS/TS) |
 | `veliora/` | Native Android Compose application |
-| `templates/organizations/` | Organization templates |
 
-Design and product documents are kept in a local `docs/` folder and are not part
-of the published repository.
+Design documents and organization templates are kept in local `docs/` and
+`templates/` folders and are not part of the published repository.
 
 ## Configuration
 

@@ -36,8 +36,9 @@ veliora/.idea/
 .cxx/
 .externalNativeBuild/
 
-# Local design and planning documents (not published)
+# Local design documents and organization templates (not published)
 docs/
+templates/
 
 # Runtime data
 .logs/
