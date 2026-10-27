@@ -1,9 +1,12 @@
 package com.veliora.data.realtime
 
+import android.util.Log
 import com.veliora.BuildConfig
 import com.veliora.data.api.ApiClient
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -14,8 +17,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
+import okhttp3.sse.EventSources
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Server event frame (doc 24 §10.1).
@@ -31,12 +36,13 @@ data class EventFrame(
 )
 
 /**
- * Legacy WebSocket transport.
+ * One authenticated SSE stream per organization.
  *
- * The Sofuu backend no longer exposes a WebSocket upgrade; live events are
- * served as SSE at GET /v1/organizations/{orgId}/events. This client is kept
- * until the Android migration lands, then it must use SSE with the Clerk
- * bearer token. The backend's /ws compatibility route returns HTTP 426.
+ * The Sofuu backend exposes live events at
+ * GET /v1/organizations/{orgId}/events. OkHttp's SSE client can set the Clerk
+ * Authorization header (unlike browser EventSource), so no query-string token
+ * is used. The backend closes the stream when the JWT expires; a reconnect
+ * fetches a fresh token through ApiClient and resumes from the next event.
  */
 class RealtimeClient(
     private val orgId: String,
@@ -46,49 +52,82 @@ class RealtimeClient(
     val events: SharedFlow<EventFrame> = _events
 
     private val json = Json { ignoreUnknownKeys = true }
-    @Volatile private var socket: WebSocket? = null
+    private val factory by lazy { EventSources.createFactory(ApiClient.sseClient) }
+    private val attempt = AtomicInteger(0)
+
+    @Volatile private var source: EventSource? = null
     @Volatile private var closed = false
+    private var job: Job? = null
 
     fun connect() {
+        if (job?.isActive == true) return
         closed = false
-        scope.launch { connectLoop() }
+        job = scope.launch { connectLoop() }
     }
 
     private suspend fun connectLoop() {
         while (!closed) {
-            try {
-                val url = "${BuildConfig.WS_BASE_URL}/ws/org/$orgId"
-                val req = Request.Builder().url(url).build()
-                val listener = listener()
-                socket = ApiClient.wsClient.newWebSocket(req, listener)
-                // Wait for the listener to report closure before reconnecting.
-                delay(5_000)
-            } catch (_: Exception) {
-                delay(3_000)
+            val disconnected = CompletableDeferred<Unit>()
+            val request = Request.Builder()
+                .url("${BuildConfig.API_BASE_URL.trimEnd('/')}/v1/organizations/$orgId/events")
+                .header("Accept", "text/event-stream")
+                .build()
+
+            val listener = object : EventSourceListener() {
+                override fun onOpen(eventSource: EventSource, response: Response) {
+                    attempt.set(0)
+                }
+
+                override fun onEvent(
+                    eventSource: EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String,
+                ) {
+                    if (data.isBlank()) return
+                    runCatching { json.decodeFromString<EventFrame>(data) }
+                        .onSuccess { _events.tryEmit(it) }
+                        .onFailure { Log.w(TAG, "Ignoring malformed SSE frame", it) }
+                }
+
+                override fun onClosed(eventSource: EventSource) {
+                    disconnected.complete(Unit)
+                }
+
+                override fun onFailure(
+                    eventSource: EventSource,
+                    t: Throwable?,
+                    response: Response?,
+                ) {
+                    if (response?.code == 401) {
+                        Log.w(TAG, "SSE rejected the Clerk token; reconnecting after refresh")
+                    } else if (t != null) {
+                        Log.w(TAG, "SSE connection failed", t)
+                    }
+                    disconnected.complete(Unit)
+                }
             }
-        }
-    }
 
-    private fun listener() = object : WebSocketListener() {
-        override fun onMessage(webSocket: WebSocket, text: String) {
-            try {
-                val frame = json.decodeFromString<EventFrame>(text)
-                _events.tryEmit(frame)
-            } catch (_: Exception) {
-            }
-        }
+            source = factory.newEventSource(request, listener)
+            disconnected.await()
+            source?.cancel()
+            source = null
 
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            // Reconnect handled by connectLoop.
-        }
-
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (closed) break
+            val failures = attempt.incrementAndGet().coerceAtMost(6)
+            delay((1_000L shl (failures - 1)).coerceAtMost(30_000L))
         }
     }
 
     fun close() {
         closed = true
-        socket?.close(1000, "client close")
-        socket = null
+        source?.cancel()
+        source = null
+        job?.cancel()
+        job = null
+    }
+
+    private companion object {
+        const val TAG = "RealtimeClient"
     }
 }

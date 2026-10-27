@@ -51,7 +51,8 @@ with `sofuu.agent.define` and runs them with `sofuu.agent.run`.
 
 ## Authentication
 
-Every `/v1` route except `/v1/health` requires a Clerk session token:
+Clerk is mandatory. There is no anonymous or authless product mode. Every
+`/v1` route except `/v1/health` requires a Clerk session token:
 
 ```http
 Authorization: Bearer <Clerk session JWT>
@@ -59,10 +60,20 @@ Authorization: Bearer <Clerk session JWT>
 
 The gateway verifies the token locally against the Clerk JWKS with
 `sofuu.crypto.verifyJWT`. It checks the RS256 signature, `exp`, `nbf`,
-`iss` (when configured), `azp` (when authorized parties are configured), and
-`sub`. No Clerk secret key is used.
+`iss` (when configured), `azp` (when the claim is present), and `sub`. No
+Clerk secret key is used. Clerk's native Android SDK may omit `azp` because
+there is no browser `Origin`; a missing `azp` is accepted, while a present
+`azp` must be allow-listed.
 
-- `GET /v1/me` returns the authenticated `user_id`, `session_id`, and claims.
+- `GET /v1/me` returns the authenticated `user_id`, `session_id`, a minimal
+  `account` record, and the token claims.
+- The account record contains only the Clerk `sub`, `first_seen_at`,
+  `last_seen_at`, coarse `app_version`, and `platform`. Email, name, avatar,
+  tokens, and application content are never stored there. Updates are
+  throttled to one write per user every 15 minutes.
+- Clients may send `X-Veliora-App-Version` and `X-Veliora-Platform` on
+  authenticated requests. The Android client sends `android` and
+  `BuildConfig.VERSION_NAME` automatically.
 - Organizations are owned by the authenticated `sub`. Cross-user reads and
   writes return `404`.
 - SSE (`/v1/organizations/{org}/events` and investigation events) also accepts
@@ -72,9 +83,10 @@ The gateway verifies the token locally against the Clerk JWKS with
 - CORS reflects only `VELIORA_APP_ORIGINS`; unknown origins get no
   `Access-Control-Allow-Origin` header.
 
-`VELIORA_AUTH_MODE=dev` is a deliberate local/testing mode. It accepts
+`VELIORA_AUTH_MODE=dev` is a deliberate test mode. It accepts
 `Authorization: Bearer dev:<user_id>` and logs a warning at startup. It is not
-an authless fallback: a missing token is still `401`.
+an authless fallback: a missing token is still `401`. Do not ship a product
+client against dev mode; the Android app always uses Clerk.
 
 ### Clerk setup checklist
 

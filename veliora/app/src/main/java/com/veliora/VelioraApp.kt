@@ -2,6 +2,8 @@ package com.veliora
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
+import com.clerk.api.Clerk
 import com.veliora.data.repo.OrgStore
 import com.veliora.data.repo.VelioraRepository
 
@@ -18,6 +20,10 @@ class VelioraApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (ClerkConfig.isConfigured()) {
+            runCatching { Clerk.initialize(this, ClerkConfig.publishableKey) }
+                .onFailure { Log.e("VelioraApp", "Clerk initialization failed", it) }
+        }
         repository = VelioraRepository()
         orgStore = OrgStore(repository)
     }

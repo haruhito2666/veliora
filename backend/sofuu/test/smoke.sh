@@ -53,10 +53,34 @@ echo "ok: $HEALTH"
 echo "== auth is required and dev identity works =="
 CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/v1/me")"
 [ "$CODE" = "401" ] || { echo "FAIL: unauthenticated /v1/me returned $CODE"; exit 1; }
-ME_USER="$(curl -fsS "${AUTH[@]}" "$BASE/v1/me" \
-  | python3 -c 'import sys,json; print(json.load(sys.stdin)["user_id"])')"
+ME="$(curl -fsS "${AUTH[@]}" \
+  -H 'X-Veliora-Platform: android' \
+  -H 'X-Veliora-App-Version: 1.0.0' \
+  "$BASE/v1/me")"
+ME_USER="$(printf '%s' "$ME" | python3 -c 'import sys,json; print(json.load(sys.stdin)["user_id"])')"
 [ "$ME_USER" = "user_smoke" ] || { echo "FAIL: /v1/me user = $ME_USER"; exit 1; }
-echo "ok: /v1/me -> $ME_USER"
+printf '%s' "$ME" | python3 -c '
+import sys, json
+a = json.load(sys.stdin)["account"]
+assert a["user_id"] == "user_smoke", a
+assert a["first_seen_at"], a
+assert a["last_seen_at"], a
+assert a["app_version"] == "1.0.0", a
+assert a["platform"] == "android", a
+assert set(a) == {"user_id", "first_seen_at", "last_seen_at", "app_version", "platform"}, a
+' || { echo "FAIL: minimal account record is wrong: $ME"; exit 1; }
+FIRST_SEEN="$(printf '%s' "$ME" | python3 -c 'import sys,json; print(json.load(sys.stdin)["account"]["first_seen_at"])')"
+ME2="$(curl -fsS "${AUTH[@]}" \
+  -H 'X-Veliora-Platform: android' \
+  -H 'X-Veliora-App-Version: 1.0.1' \
+  "$BASE/v1/me")"
+printf '%s' "$ME2" | FIRST_SEEN="$FIRST_SEEN" python3 -c '
+import os, json, sys
+a = json.load(sys.stdin)["account"]
+assert a["first_seen_at"] == os.environ["FIRST_SEEN"], a
+assert a["app_version"] == "1.0.1", a
+' || { echo "FAIL: account touch did not update version: $ME2"; exit 1; }
+echo "ok: /v1/me -> $ME_USER; minimal account record persisted"
 
 echo "== create organization =="
 ORG="$(curl -fsS "${AUTH[@]}" -X POST "$BASE/v1/organizations" \

@@ -1,8 +1,10 @@
 import { newId, nowISO } from "../core/ids.js";
 import { STARTUP_TEMPLATE } from "../core/templates.js";
+import { AccountRegistry } from "../auth/accounts.js";
 
 const BASE_CORS = {
-  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Allow-Headers":
+    "Authorization, Content-Type, X-Veliora-App-Version, X-Veliora-Platform",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Max-Age": "600",
   Vary: "Origin",
@@ -83,8 +85,17 @@ function bodyOf(req, res) {
   }
 }
 
+function clientMeta(req) {
+  const headers = (req && req.headers) || {};
+  return {
+    app_version: String(headers["x-veliora-app-version"] || ""),
+    platform: String(headers["x-veliora-platform"] || ""),
+  };
+}
+
 export function createGateway({ store, bus, orchestrator, config, auth }) {
   const routes = [];
+  const accounts = new AccountRegistry(store);
 
   function add(method, pattern, handler) {
     routes.push({ method, pattern: pattern.split("/").filter(Boolean), handler });
@@ -129,11 +140,23 @@ export function createGateway({ store, bus, orchestrator, config, auth }) {
         }
       }
 
+      // Clerk is the source of identity; this only keeps a minimal local
+      // projection for account counts and support. A registry failure must
+      // not take down an otherwise authenticated request.
+      let account = null;
+      if (user) {
+        try {
+          account = accounts.touch(user.user_id, clientMeta(req));
+        } catch (error) {
+          console.warn(`account registry: touch failed: ${error.message || error}`);
+        }
+      }
+
       for (const route of routes) {
         if (route.method !== req.method) continue;
         const params = matchRoute(route.pattern, parts);
         if (!params) continue;
-        await route.handler({ req, res, params, query, user, cors });
+        await route.handler({ req, res, params, query, user, account, cors });
         return;
       }
       sendError(res, 404, "not_found", "route not found");
@@ -167,10 +190,11 @@ export function createGateway({ store, bus, orchestrator, config, auth }) {
     });
   });
 
-  add("GET", "/v1/me", ({ res, user }) => {
+  add("GET", "/v1/me", ({ res, user, account }) => {
     sendJSON(res, 200, {
       user_id: user.user_id,
       session_id: user.session_id,
+      account,
       claims: user.claims,
     });
   });

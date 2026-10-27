@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Central store for organization data and live WebSocket events. */
+/** Central store for organization data and live SSE events. */
 class OrgStore(
     private val repository: VelioraRepository,
 ) {
@@ -33,7 +33,7 @@ class OrgStore(
     @Volatile private var realtime: RealtimeClient? = null
     @Volatile private var currentOrgId: String? = null
 
-    /** Loads the organization snapshot and investigations, then opens the WS stream. */
+    /** Loads the organization snapshot and investigations, then opens the SSE stream. */
     fun loadOrg(orgId: String) {
         currentOrgId = orgId
         scope.launch {

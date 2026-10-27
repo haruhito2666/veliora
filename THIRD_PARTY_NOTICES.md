@@ -5,7 +5,7 @@ Veliora's source is MIT licensed. The project also uses or redistributes third-p
 ## Runtime dependencies
 
 - The backend runs on the [Sofuu](https://sofuu.xyz) runtime. Sofuu is MIT licensed; its QTSQ format specification has separate terms, and using QTSQ through the Sofuu runtime is free. See the Sofuu distribution for details.
-- Android dependencies are declared in `veliora/gradle/libs.versions.toml`; AndroidX, Material, Retrofit, OkHttp, and Kotlin artifacts retain their upstream licenses.
+- Android dependencies are declared in `veliora/gradle/libs.versions.toml`; AndroidX, Material, Retrofit, OkHttp, Kotlin, and the [Clerk Android SDK](https://github.com/clerk/clerk-android) (`com.clerk:clerk-android-ui`, MIT) artifacts retain their upstream licenses.
 
 ## Bundled fonts
 

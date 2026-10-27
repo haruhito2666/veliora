@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +19,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.clerk.api.Clerk
+import com.clerk.api.network.serialization.errorMessage
+import com.clerk.api.network.serialization.onFailure
+import com.clerk.api.network.serialization.onSuccess
 import com.veliora.app
 import com.veliora.data.api.OrgLite
 import com.veliora.ui.components.EmptyState
@@ -25,6 +31,7 @@ import com.veliora.ui.components.ScrollableHeader
 import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.components.VelioraCard
 import com.veliora.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun InstanceScreen(
@@ -32,9 +39,12 @@ fun InstanceScreen(
 ) {
     val context = LocalContext.current
     val app = remember(context) { context.app }
+    val scope = rememberCoroutineScope()
+    val user by Clerk.userFlow.collectAsStateWithLifecycle()
     var organizations by remember { mutableStateOf<List<OrgLite>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var signOutError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         error = null
@@ -56,16 +66,45 @@ fun InstanceScreen(
             item { ScrollableHeader(title = "Instance") }
             item {
                 VelioraCard(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(Spacing.mdLg), verticalAlignment = Alignment.Top) {
-                        Icon(Icons.Filled.Info, null, tint = Green500, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(Spacing.md))
-                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                            Text("Authless local mode", style = MaterialTheme.typography.titleMedium, color = Slate900, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "Anyone who can reach this gateway can read and modify its organizations. Run Veliora only on a trusted local or private network.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Slate500,
-                            )
+                    Column(Modifier.fillMaxWidth().padding(Spacing.mdLg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Info, null, tint = Green500, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(Spacing.md))
+                            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                                Text(
+                                    "Signed in with Clerk",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Slate900,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    user?.primaryEmailAddress?.emailAddress ?: user?.id ?: "Unknown user",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Slate500,
+                                )
+                            }
+                        }
+                        Text(
+                            "Organizations are scoped to this Clerk account. Signing out returns to the Clerk sign-in screen.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Slate500,
+                        )
+                        signOutError?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        Button(
+                            onClick = {
+                                signOutError = null
+                                scope.launch {
+                                    Clerk.auth.signOut()
+                                        .onSuccess { app.orgStore.clear() }
+                                        .onFailure {
+                                            signOutError = it.errorMessage
+                                        }
+                                }
+                            },
+                        ) {
+                            Text("Sign out")
                         }
                     }
                 }

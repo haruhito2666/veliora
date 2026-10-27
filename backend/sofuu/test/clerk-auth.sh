@@ -66,9 +66,21 @@ echo "$HEALTH" | grep -q '"auth":"clerk"' || { echo "FAIL: $HEALTH"; exit 1; }
 echo "ok: $HEALTH"
 
 echo "== valid RS256 token is accepted =="
-ME="$(curl -fsS "${AUTH[@]}" "$BASE/v1/me")"
-echo "$ME" | grep -q '"user_id":"user_test_123"' || { echo "FAIL: $ME"; exit 1; }
-echo "ok: $ME"
+ME="$(curl -fsS "${AUTH[@]}" \
+  -H 'X-Veliora-Platform: android' \
+  -H 'X-Veliora-App-Version: 2.0.0' \
+  "$BASE/v1/me")"
+printf '%s' "$ME" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert d["user_id"] == "user_test_123", d
+a = d["account"]
+assert a["user_id"] == "user_test_123", a
+assert a["platform"] == "android", a
+assert a["app_version"] == "2.0.0", a
+assert set(a) == {"user_id", "first_seen_at", "last_seen_at", "app_version", "platform"}, a
+' || { echo "FAIL: $ME"; exit 1; }
+echo "ok: valid token + minimal account record"
 
 echo "== missing/tampered tokens are rejected =="
 CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/v1/me")"
