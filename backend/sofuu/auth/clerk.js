@@ -73,7 +73,7 @@ export class Authenticator {
     }
     if (this.config.clerk.authorizedParties.length === 0) {
       console.warn(
-        "veliora auth: CLERK_AUTHORIZED_PARTIES is empty; Clerk's `azp` claim will not be checked",
+        "veliora auth: CLERK_AUTHORIZED_PARTIES is empty; a token that includes an `azp` claim will be rejected",
       );
     }
     try {

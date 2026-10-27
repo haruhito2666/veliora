@@ -7,9 +7,42 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Release signing is opt-in. Set the four VELIORA_RELEASE_* values in the
+// environment (or in ~/.gradle/gradle.properties) to produce a signed release
+// build. They are intentionally not committed.
+val releaseStoreFile = (project.findProperty("VELIORA_RELEASE_STORE_FILE") as String?)
+    ?: System.getenv("VELIORA_RELEASE_STORE_FILE")
+    ?: ""
+val releaseStorePassword = (project.findProperty("VELIORA_RELEASE_STORE_PASSWORD") as String?)
+    ?: System.getenv("VELIORA_RELEASE_STORE_PASSWORD")
+    ?: ""
+val releaseKeyAlias = (project.findProperty("VELIORA_RELEASE_KEY_ALIAS") as String?)
+    ?: System.getenv("VELIORA_RELEASE_KEY_ALIAS")
+    ?: ""
+val releaseKeyPassword = (project.findProperty("VELIORA_RELEASE_KEY_PASSWORD") as String?)
+    ?: System.getenv("VELIORA_RELEASE_KEY_PASSWORD")
+    ?: ""
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { it.isNotBlank() }
+
 android {
     namespace = "com.veliora"
     compileSdk = 36
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.veliora"
@@ -18,7 +51,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // API base URL for local dev (Android emulator → host machine).
+        // API base URL. Override it for a device or production deployment:
+        // -PVELIORA_API_BASE=https://api.your-domain.example
         val apiBase = (project.findProperty("VELIORA_API_BASE") as String?)
             ?: "http://10.0.2.2:8080"
         buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
@@ -36,6 +70,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

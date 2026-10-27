@@ -94,7 +94,7 @@ a device or production deployment:
 ```bash
 ./gradlew :app:assembleDebug \
   -PVELIORA_CLERK_PUBLISHABLE_KEY=pk_test_your_key \
-  -PVELIORA_API_BASE=https://veliora-app.rikuhana.com
+  -PVELIORA_API_BASE=https://api.your-domain.example
 ```
 
 If the key is missing, the app launches to an explicit "Clerk is not
@@ -109,6 +109,76 @@ also keeps a deliberately small account projection per Clerk subject
 support and app-version checks do not require storing email addresses, names,
 or application content. The Android client sends its version and platform
 headers automatically; `/v1/me` returns the record.
+
+### Production setup
+
+The production Clerk Frontend API for this deployment is:
+
+```text
+https://clerk.veliora-app.rikuhana.com
+https://clerk.veliora-app.rikuhana.com/.well-known/jwks.json
+```
+
+The backend in `backend/sofuu/veliora.json` and `.env.example` already points
+at those URLs. In the Clerk Dashboard, with the **Production** instance
+selected:
+
+1. Open **Configure → Developers → Native applications** and keep **Native
+   API** enabled.
+2. Click **Add Android app** and enter:
+   - **Namespace:** `veliora-production`
+   - **Package name:** `com.veliora` (must match `applicationId`)
+   - **SHA-256 fingerprints:** add the debug certificate now, and the release
+     certificate before shipping.
+3. If you use Google or another OAuth provider, add the mobile SSO redirect
+   URL shown by Clerk. Email/password and email-code sign-in do not need one.
+4. Open **API keys** and confirm the **Publishable key** matches the value in
+   `.env` (`VELIORA_CLERK_PUBLISHABLE_KEY`). Do not copy the secret key into
+   the app.
+
+The debug certificate for this workspace is:
+
+```text
+FE:91:3C:9B:83:A6:59:12:9B:4C:6B:E0:01:00:09:1B:A7:9A:E9:E0:1C:95:5B:B0:A8:41:28:23:10:D5:72:73
+```
+
+Create a release keystore and read its fingerprint:
+
+```bash
+keytool -genkeypair -v \
+  -keystore veliora-release.jks \
+  -alias veliora \
+  -keyalg RSA -keysize 4096 -validity 10000
+keytool -list -v -keystore veliora-release.jks -alias veliora | grep SHA256
+```
+
+Add the release fingerprint to the same Clerk Android app. If you use Play
+App Signing, add the Play Console **app signing certificate** fingerprint too,
+because that is the certificate installed on users' devices.
+
+Set the release-signing values outside git (for example in your shell or
+`~/.gradle/gradle.properties`), then build:
+
+```bash
+cd veliora
+export VELIORA_RELEASE_STORE_FILE=/absolute/path/to/veliora-release.jks
+export VELIORA_RELEASE_STORE_PASSWORD=...
+export VELIORA_RELEASE_KEY_ALIAS=veliora
+export VELIORA_RELEASE_KEY_PASSWORD=...
+export VELIORA_CLERK_PUBLISHABLE_KEY=pk_live_...
+export VELIORA_API_BASE=https://api.your-domain.example
+./gradlew :app:bundleRelease
+```
+
+The backend must be reachable over HTTPS from the device; the Android network
+security config only permits cleartext for `10.0.2.2`, `localhost`, and
+`127.0.0.1`. For a physical device against a local backend, use USB debugging
+and `adb reverse`:
+
+```bash
+adb reverse tcp:8080 tcp:8080
+# Build with -PVELIORA_API_BASE=http://127.0.0.1:8080
+```
 
 ## Repository map
 
