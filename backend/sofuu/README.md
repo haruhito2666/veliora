@@ -1,11 +1,22 @@
-# Veliora Sofuu Backend
+# Veliora Sofuu Gateway
 
-This is the in-process backend for Veliora, written against the **Sofuu SDK**.
-It uses only the public runtime surface (`sofuu.http`, `sofuu.storage`,
-`sofuu.ai`, `sofuu.agent`, `sofuu.crypto`) and does not import Sofuu's
-internal source files.
+The Veliora gateway, written against the **Sofuu SDK**. It uses only the
+public runtime surface (`sofuu.storage`, `sofuu.ai`, `sofuu.agent`,
+`sofuu.crypto`, and `sofuu.http` for the optional host server) and does not
+import Sofuu's internal source files.
 
-## Run
+There are two hosts for the same gateway code:
+
+- **Android (product):** `embedded.js` is bundled into the APK by
+  `scripts/build_embedded_js.sh` and executed inside
+  `com.sofuu:sofuu-android:0.2.0`. Requests, event reads, and loop ticks go
+  through the SDK's in-process funnel; there is no HTTP listener and no
+  `sofuu` executable in the app.
+- **Host (tests/reference):** `veliora.js` starts `sofuu.http.createServer`
+  for the smoke tests and for a desktop client. The Android app does not use
+  this path.
+
+## Run the host reference
 
 ```bash
 sofuu doctor
@@ -139,6 +150,25 @@ No SQL, Postgres, or external daemon is involved. Organizations carry an
 `/api/v1/...` is accepted as an alias. Sofuu's HTTP server does not expose a
 WebSocket upgrade, so live events use Server-Sent Events; the old `/ws/...`
 paths return an explicit `426`.
+
+## Embedded Android runtime
+
+`scripts/build_embedded_js.sh` bundles `embedded.js` into
+`veliora/app/src/main/assets/veliora-embedded.js`. The Kotlin wrapper starts
+it on one worker thread and calls:
+
+- `sofuu.veliora.init(config)` once at app startup;
+- `sofuu.veliora.request({method,url,headers,body})` for each gateway route;
+- `sofuu.veliora.tick({ms})` to drain the embedded libuv loop while a
+  pipeline is running;
+- `sofuu.veliora.events({org_id,user_id,since_seq})` for durable event
+  reads (available for a future live UI; the current app polls the gateway
+  routes instead).
+
+The embedded entry disables the SSE heartbeat and never creates a listening
+socket. Configuration is passed from Kotlin (`storePath`, `mode`, Clerk
+issuer/JWKS, pacing) rather than read from the host environment. See
+`veliora/app/src/main/java/com/veliora/data/sofuu/EmbeddedSofuu.kt`.
 
 ## Test
 

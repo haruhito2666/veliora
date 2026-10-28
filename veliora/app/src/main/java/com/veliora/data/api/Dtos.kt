@@ -5,6 +5,12 @@ import kotlinx.serialization.Serializable
 
 // ── Organizations ───────────────────────────────────────────────────────
 
+/** Generic list wrapper for endpoints returning `{ "data": [...] }`. */
+@Serializable
+data class ListResponse<T>(
+    val data: List<T> = emptyList(),
+)
+
 @Serializable
 data class CreateOrgRequest(
     val name: String,

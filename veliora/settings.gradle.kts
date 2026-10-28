@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Sofuu Android SDK: GitHub Pages Maven repo (not Maven Central).
+        maven("https://sofuu-runtime.github.io/sofuu/maven")
     }
 }
 

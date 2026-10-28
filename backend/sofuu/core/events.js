@@ -10,11 +10,16 @@ import { newId, nowISO } from "./ids.js";
 // Events are also persisted in the `events` collection so the stream has a
 // durable audit trail.
 export class EventBus {
-  constructor(store) {
+  constructor(store, options = {}) {
     this.store = store;
     this.clients = new Set();
     this.sequences = new Map();
-    this.heartbeat = setInterval(() => this._heartbeat(), 15000);
+    // The host CLI keeps an SSE heartbeat. The embedded Android runtime has
+    // no long-lived server pump, so it disables the interval; without this,
+    // an eval call would never reach an idle libuv loop.
+    this.heartbeat = options.heartbeat === false
+      ? null
+      : setInterval(() => this._heartbeat(), 15000);
   }
 
   subscribe(orgID, invID, res, cors = {}, expiresAt = 0) {
@@ -107,7 +112,8 @@ export class EventBus {
   }
 
   close() {
-    clearInterval(this.heartbeat);
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
     for (const client of Array.from(this.clients)) {
       if (client.expiryTimer) clearTimeout(client.expiryTimer);
       try {

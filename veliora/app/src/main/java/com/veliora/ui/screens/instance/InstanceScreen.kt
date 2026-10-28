@@ -32,6 +32,7 @@ import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.components.VelioraCard
 import com.veliora.ui.theme.*
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 @Composable
 fun InstanceScreen(
@@ -45,12 +46,22 @@ fun InstanceScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var signOutError by remember { mutableStateOf<String?>(null) }
+    var sdkAbi by remember { mutableStateOf(0) }
+    var sdkCaps by remember { mutableStateOf<JSONObject?>(null) }
+    var sdkSelfTest by remember { mutableStateOf<JSONObject?>(null) }
+    var sdkError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         error = null
         runCatching { app.repository.organizations().data }
             .onSuccess { organizations = it }
             .onFailure { error = it.message ?: "Failed to load this instance" }
+        runCatching { app.repository.sdkAbiVersion() to app.repository.sdkCapabilities() }
+            .onSuccess { (abi, caps) -> sdkAbi = abi; sdkCaps = caps }
+            .onFailure { sdkError = it.message ?: "Embedded runtime unavailable" }
+        runCatching { app.repository.sdkSelfTest() }
+            .onSuccess { sdkSelfTest = it }
+            .onFailure { sdkError = it.message ?: "Native bridge self-test failed" }
         loading = false
     }
 
@@ -105,6 +116,62 @@ fun InstanceScreen(
                             },
                         ) {
                             Text("Sign out")
+                        }
+                    }
+                }
+            }
+            item {
+                VelioraCard(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(Spacing.mdLg),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        Text(
+                            "On-device Sofuu",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Slate900,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        when {
+                            sdkError != null -> Text(
+                                sdkError ?: "Embedded runtime unavailable",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            sdkCaps == null -> Text(
+                                "Starting libsofuu…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate500,
+                            )
+                            else -> {
+                                Text(
+                                    "SDK ABI v$sdkAbi · QTSQ memory · no backend process",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Slate500,
+                                )
+                                val features = listOf(
+                                    "has_ai" to "AI",
+                                    "has_agent" to "Agents",
+                                    "has_memory" to "Memory",
+                                    "has_storage" to "Storage",
+                                    "has_crypto" to "Crypto",
+                                    "has_mcp" to "MCP",
+                                    "has_web" to "Web",
+                                ).filter { sdkCaps?.optBoolean(it.first) == true }
+                                    .joinToString(" · ") { it.second }
+                                Text(
+                                    features.ifEmpty { "No optional capabilities reported" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Slate500,
+                                )
+                                val sha = sdkSelfTest?.optString("sha256").orEmpty()
+                                val dims = sdkSelfTest?.optInt("embeddingDims") ?: 0
+                                Text(
+                                    "SHA-256 ${sha.take(12)}… · embeddings ${dims}d",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Slate500,
+                                )
+                            }
                         }
                     }
                 }

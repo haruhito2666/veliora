@@ -68,7 +68,7 @@ function list(value, fallback) {
 
 export async function loadConfig() {
   const file = await readConfigFile();
-  const env = process.env || {};
+  const env = (typeof process !== "undefined" && process.env) || {};
   const config = { ...DEFAULTS, ...file };
   config.clerk = { ...DEFAULTS.clerk, ...(file.clerk || {}) };
   config.appOrigins = list(file.appOrigins || config.appOrigins, DEFAULTS.appOrigins);

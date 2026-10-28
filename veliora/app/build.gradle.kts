@@ -51,11 +51,49 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // API base URL. Override it for a device or production deployment:
-        // -PVELIORA_API_BASE=https://api.your-domain.example
-        val apiBase = (project.findProperty("VELIORA_API_BASE") as String?)
-            ?: "http://10.0.2.2:8080"
-        buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
+        // The Sofuu AAR ships arm64-v8a and x86_64. Do not install on a
+        // 32-bit-only device where libsofuu.so cannot load.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
+        // The app runs the Veliora pipeline inside libsofuu, so there is no
+        // remote API base. These values configure the embedded runtime.
+        val clerkIssuer = (project.findProperty("VELIORA_CLERK_ISSUER") as String?)
+            ?: System.getenv("VELIORA_CLERK_ISSUER")
+            ?: System.getenv("CLERK_ISSUER")
+            ?: "https://clerk.veliora-app.rikuhana.com"
+        val clerkJwks = (project.findProperty("VELIORA_CLERK_JWKS_URL") as String?)
+            ?: System.getenv("VELIORA_CLERK_JWKS_URL")
+            ?: System.getenv("CLERK_JWKS_URL")
+            ?: "$clerkIssuer/.well-known/jwks.json"
+        val clerkAuthorizedParties = (project.findProperty("VELIORA_CLERK_AUTHORIZED_PARTIES") as String?)
+            ?: System.getenv("VELIORA_CLERK_AUTHORIZED_PARTIES")
+            ?: System.getenv("CLERK_AUTHORIZED_PARTIES")
+            ?: ""
+        val embeddedMode = (project.findProperty("VELIORA_EMBEDDED_MODE") as String?)
+            ?: System.getenv("VELIORA_EMBEDDED_MODE")
+            ?: "scripted"
+        val embeddedStepDelay = ((project.findProperty("VELIORA_STEP_DELAY_MS") as String?)
+            ?: System.getenv("VELIORA_STEP_DELAY_MS")
+            ?: "25").toIntOrNull() ?: 25
+        val embeddedProvider = (project.findProperty("VELIORA_PROVIDER") as String?)
+            ?: System.getenv("VELIORA_PROVIDER")
+            ?: ""
+        val embeddedModel = (project.findProperty("VELIORA_MODEL") as String?)
+            ?: System.getenv("VELIORA_MODEL")
+            ?: ""
+
+        fun quoted(value: String): String =
+            "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+        buildConfigField("String", "CLERK_ISSUER", quoted(clerkIssuer))
+        buildConfigField("String", "CLERK_JWKS_URL", quoted(clerkJwks))
+        buildConfigField("String", "CLERK_AUTHORIZED_PARTIES", quoted(clerkAuthorizedParties))
+        buildConfigField("String", "EMBEDDED_MODE", quoted(embeddedMode))
+        buildConfigField("int", "EMBEDDED_STEP_DELAY_MS", embeddedStepDelay.toString())
+        buildConfigField("String", "EMBEDDED_PROVIDER", quoted(embeddedProvider))
+        buildConfigField("String", "EMBEDDED_MODEL", quoted(embeddedModel))
 
         // Clerk publishable key: -PVELIORA_CLERK_PUBLISHABLE_KEY=pk_test_...
         // or the same variable in the environment. A publishable key is not a
@@ -116,11 +154,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.kotlinx.serialization)
-    implementation(libs.okhttp)
-    implementation(libs.okhttp.logging)
-    implementation(libs.okhttp.sse)
+    implementation("com.sofuu:sofuu-android:0.2.0")
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.clerk.ui) {
         // Clerk's theming helper asks for a JetBrains Compose material3 alpha,

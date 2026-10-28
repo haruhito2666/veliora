@@ -1,8 +1,8 @@
-# Veliora — Sofuu backend helpers.
+# Veliora — Sofuu gateway helpers.
 
 SHELL := /bin/bash
 SOFUU ?= sofuu
-.PHONY: run test test-clerk doctor build-android clean
+.PHONY: run test test-clerk doctor embedded-js test-embedded build-android clean
 
 run:
 	$(SOFUU) run backend/sofuu/veliora.js
@@ -18,6 +18,12 @@ test:
 
 test-clerk:
 	SOFUU_BIN=$(SOFUU) bash backend/sofuu/test/clerk-auth.sh
+
+embedded-js:
+	@bash scripts/build_embedded_js.sh
+
+test-embedded:
+	SOFUU_BIN=$(SOFUU) bash scripts/test_embedded_gateway.sh
 
 build-android:
 	cd veliora && ./gradlew :app:assembleDebug

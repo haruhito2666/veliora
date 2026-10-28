@@ -2,17 +2,25 @@ package com.veliora.data.repo
 
 import com.veliora.data.Investigation
 import com.veliora.data.Organization
-import com.veliora.data.realtime.EventFrame
-import com.veliora.data.realtime.RealtimeClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** Central store for organization data and live SSE events. */
+/**
+ * Central store for organization data.
+ *
+ * The old implementation subscribed to server-sent events. The embedded
+ * runtime has no background HTTP pump, so this store polls the in-process
+ * gateway and advances its event loop between reads.
+ */
 class OrgStore(
     private val repository: VelioraRepository,
 ) {
@@ -30,12 +38,14 @@ class OrgStore(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    @Volatile private var realtime: RealtimeClient? = null
     @Volatile private var currentOrgId: String? = null
+    private var pollJob: Job? = null
 
-    /** Loads the organization snapshot and investigations, then opens the SSE stream. */
+    /** Loads the organization snapshot, then keeps it fresh locally. */
     fun loadOrg(orgId: String) {
         currentOrgId = orgId
+        pollJob?.cancel()
+
         scope.launch {
             _loading.value = true
             _error.value = null
@@ -49,43 +59,32 @@ class OrgStore(
                 _loading.value = false
             }
         }
-        connectRealtime(orgId)
+
+        pollJob = scope.launch { pollLoop(orgId) }
     }
 
-    private fun connectRealtime(orgId: String) {
-        realtime?.close()
-        val client = RealtimeClient(orgId)
-        realtime = client
-        scope.launch { client.events.collect { frame -> applyFrame(frame) } }
-        client.connect()
-    }
+    private suspend fun pollLoop(orgId: String) {
+        while (currentCoroutineContext().isActive && currentOrgId == orgId) {
+            val active = _investigations.value.any { it.phase != com.veliora.data.InvestigationPhase.REPORT }
+            delay(if (active) 250 else 2_000)
+            if (currentOrgId != orgId) break
 
-    private fun applyFrame(frame: EventFrame) {
-        when (frame.event) {
-            "investigation.started", "investigation.phase_changed", "investigation.completed" ->
-                refreshInvestigations()
-            "worker.status_changed",
-            "evidence.submitted", "evidence.challenged", "evidence.upheld",
-            "communication.sent", "communication.received",
-            "evolution.proposed", "evolution.executed",
-            "meeting.called", "meeting.started", "meeting.concluded" ->
-                refreshOrganization()
-        }
-    }
+            // Drain one bounded slice of the runtime loop so scripted or
+            // local-model investigation steps can progress while the UI is
+            // idle. Idle organizations only need an occasional refresh.
+            if (active) runCatching { repository.pump() }
 
-    private fun refreshInvestigations() {
-        val orgId = currentOrgId ?: return
-        scope.launch {
-            runCatching { repository.investigations(orgId).map { Mapper.toInvestigation(it) } }
-                .onSuccess { _investigations.value = it }
-        }
-    }
-
-    private fun refreshOrganization() {
-        val orgId = currentOrgId ?: return
-        scope.launch {
             runCatching { repository.organization(orgId) }
-                .onSuccess { snap -> _organization.value = Mapper.toOrganization(snap, snap.dna) }
+                .onSuccess { snap ->
+                    _organization.value = Mapper.toOrganization(snap, snap.dna)
+                    _error.value = null
+                }
+
+            runCatching { repository.investigations(orgId) }
+                .onSuccess { list ->
+                    _investigations.value = list.map { Mapper.toInvestigation(it) }
+                    _error.value = null
+                }
         }
     }
 
@@ -98,10 +97,11 @@ class OrgStore(
     }
 
     fun clear() {
-        realtime?.close()
-        realtime = null
+        pollJob?.cancel()
+        pollJob = null
         currentOrgId = null
         _organization.value = null
         _investigations.value = emptyList()
+        _error.value = null
     }
 }
