@@ -2,7 +2,7 @@
 
 SHELL := /bin/bash
 SOFUU ?= sofuu
-.PHONY: run test test-clerk doctor embedded-js test-embedded build-android clean
+.PHONY: run test test-clerk doctor embedded-js test-embedded build-android check-secrets install-hooks clean
 
 run:
 	$(SOFUU) run backend/sofuu/veliora.js
@@ -27,6 +27,16 @@ test-embedded:
 
 build-android:
 	cd veliora && ./gradlew :app:assembleDebug
+
+# Credential guard. Never prints the matched value, only file:line.
+check-secrets:
+	@bash scripts/check_secrets.sh --all
+	@bash scripts/check_secrets.sh --staged
+
+# Enable the checked-in pre-commit hook for this clone.
+install-hooks:
+	git config core.hooksPath .githooks
+	@echo "Git hooks installed from .githooks/"
 
 clean:
 	rm -rf .sofuu/veliora-store

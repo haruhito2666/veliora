@@ -74,6 +74,23 @@ From Android Studio, put the same line in `~/.gradle/gradle.properties` (or
 the run configuration's Gradle arguments). The key is public; never put a
 Clerk secret key (`sk_...`) in the app.
 
+### Credentials
+
+`.env`, provider keys, signing keys, `local.properties`, `google-services.json`,
+and runtime/model files are gitignored and must never be committed. Enable the
+checked-in pre-commit guard once per clone:
+
+```bash
+make install-hooks
+```
+
+`make check-secrets` audits `HEAD` and the Git index. It prints only
+`file:line`, never the matched value, and refuses credential-shaped strings and
+sensitive filenames. If a credential is ever pushed, rotate it immediately; a
+history rewrite does not make it private. The Clerk publishable key
+(`pk_live_...`) is public, but the secret key (`sk_...`) is not needed by this
+app and must never enter the repository or the APK.
+
 The app runs entirely on the device; there is no API base to configure. The
 gateway bundle is committed at
 `veliora/app/src/main/assets/veliora-embedded.js`. Regenerate it after changing

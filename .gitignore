@@ -16,13 +16,21 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+.envrc
+.netrc
+id_rsa
+id_ed25519
 *.pem
 *.key
+*.p8
 *.p12
 *.pfx
 *.jks
 *.keystore
+*.mobileprovision
 local.properties
+google-services.json
+provider-keys.json
 
 # Android and Gradle
 veliora/.gradle/
@@ -49,3 +57,9 @@ pgdata/
 *.db
 *.sqlite
 *.sqlite3
+*.qtsq
+
+# Local model weights (large and often private)
+*.gguf
+*.safetensors
+*.onnx
