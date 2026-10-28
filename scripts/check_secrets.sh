@@ -46,8 +46,8 @@ patterns=(
   'xox[baprs]-[A-Za-z0-9-]{10,}'
   'AIza[0-9A-Za-z_-]{35}'
   'hf_[A-Za-z0-9]{20,}'
-  '-----BEGIN [A-Z ]*PRIVATE KEY-----'
-  '_authToken='
+  '-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----'
+  '_authToken[=]'
 )
 combined="$(IFS='|'; printf '%s' "${patterns[*]}")"
 
