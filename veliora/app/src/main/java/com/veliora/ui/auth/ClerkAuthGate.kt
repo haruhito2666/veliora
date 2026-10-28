@@ -33,11 +33,14 @@ import com.veliora.ui.theme.Slate900
 import com.veliora.ui.theme.White
 
 /**
- * Holds the app behind Clerk's authentication flow.
+ * Reference authentication gate (Clerk adapter).
  *
- * Clerk is mandatory: there is no anonymous route. The custom screens cover Google OAuth and email
+ * The reference app has no anonymous route. These custom screens cover Google OAuth and email
  * sign-up/sign-in, and only an ACTIVE Clerk session unlocks the Veliora graph. A pending session
  * cannot mint tokens, so it is treated as signed out.
+ *
+ * To use another provider, replace this file with your own gate and keep an active session/token
+ * source for [com.veliora.data.sofuu.EmbeddedSofuu]. No maintainer Clerk instance is required.
  */
 @Composable
 fun ClerkAuthGate(content: @Composable () -> Unit) {
@@ -143,20 +146,25 @@ private fun ClerkConfigurationScreen() {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = "Clerk is not configured",
+                    text = "Auth is not configured",
                     style = MaterialTheme.typography.titleLarge,
                     color = Slate900,
                 )
                 Text(
-                    text = "Build the app with your Clerk publishable key:\n\n" +
-                        "./gradlew :app:assembleDebug \\\n" +
-                        "  -PVELIORA_CLERK_PUBLISHABLE_KEY=pk_test_...",
+                    text = "The reference app uses Clerk, but no Clerk instance is " +
+                        "shipped with this repository. Build with your own values:\n\n" +
+                        "VELIORA_CLERK_PUBLISHABLE_KEY=pk_test_...\n" +
+                        "VELIORA_CLERK_ISSUER=https://clerk.your-domain.example\n" +
+                        "VELIORA_CLERK_JWKS_URL=https://clerk.your-domain.example/" +
+                        ".well-known/jwks.json",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Slate600,
                 )
                 Text(
                     text = "The publishable key is safe to include in the app. " +
-                        "Never put a Clerk secret key (sk_...) in client code.",
+                        "Never put a Clerk secret key (sk_...) in client code. " +
+                        "To use another auth provider, replace the adapter; see the " +
+                        "README section \"Auth provider\".",
                     style = MaterialTheme.typography.bodySmall,
                     color = Slate600,
                 )

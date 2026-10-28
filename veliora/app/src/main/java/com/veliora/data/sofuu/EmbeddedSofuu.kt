@@ -159,10 +159,12 @@ class EmbeddedSofuu(private val context: Context) {
 
     private fun authorizedParties(): JSONArray {
         val parties = JSONArray()
-        // Native Clerk tokens may carry the Android package as their
-        // authorized party instead of a browser origin.
-        parties.put("com.veliora")
-        parties.put("com.veliora://")
+        // Native tokens may carry the Android package as their authorized
+        // party instead of a browser origin. Derive it from the actual app id
+        // so forks with another applicationId are not tied to com.veliora.
+        val applicationId = context.packageName
+        parties.put(applicationId)
+        parties.put("$applicationId://")
         BuildConfig.CLERK_AUTHORIZED_PARTIES
             .split(',')
             .map(String::trim)
@@ -191,7 +193,7 @@ class EmbeddedSofuu(private val context: Context) {
 
     suspend fun request(method: String, path: String, body: String? = null): Response {
         awaitReady()
-        val token = clerkToken()
+        val token = authToken()
         val args = JSONObject()
             .put("method", method)
             .put("url", path)
@@ -257,11 +259,17 @@ class EmbeddedSofuu(private val context: Context) {
         ready.await().getOrThrow()
     }
 
-    private suspend fun clerkToken(): String {
+    /**
+     * Reference auth seam: return the current bearer token from your auth
+     * provider. This implementation reads the Clerk active session; a fork
+     * using another provider replaces this function (and the auth UI) while
+     * keeping the gateway contract unchanged.
+     */
+    private suspend fun authToken(): String {
         val result = Clerk.activeSession?.fetchToken()
         val token = result?.successOrNull()?.jwt
         if (token.isNullOrBlank()) {
-            throw IOException("Not signed in with Clerk. Sign in and try again.")
+            throw IOException("Not signed in. Sign in and try again.")
         }
         return token
     }

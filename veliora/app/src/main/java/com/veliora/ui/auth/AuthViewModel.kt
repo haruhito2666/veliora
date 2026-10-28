@@ -63,10 +63,11 @@ data class AuthUiState(
 )
 
 /**
- * Drives the custom Clerk screens.
+ * Drives the custom Clerk screens (the reference auth adapter).
  *
  * Every method calls the real Clerk SDK. A completed sign-in or sign-up activates the created
- * session, which makes `Clerk.activeSession` available to the embedded Sofuu gateway.
+ * session, which makes `Clerk.activeSession` available to the embedded Sofuu gateway. A fork using
+ * another provider replaces this view model and [ClerkAuthFlow]; the gateway contract is unchanged.
  */
 class AuthViewModel : ViewModel() {
 

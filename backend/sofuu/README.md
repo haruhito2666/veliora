@@ -46,11 +46,11 @@ The API listens on `http://127.0.0.1:8080` by default. Configuration lives in
 | `VELIORA_MAX_CYCLES` | research loop cap (default `3`) |
 | `VELIORA_STEP_DELAY_MS` | pacing delay between worker steps |
 | `VELIORA_FALLBACK_SCRIPTED` | fall back to fixtures if an SDK model call fails |
-| `VELIORA_AUTH_MODE` | `clerk` (default) or `dev` (local tests only) |
+| `VELIORA_AUTH_MODE` | `clerk` (reference verifier) or `dev` (local tests only) |
 | `VELIORA_APP_ORIGINS` | comma-separated CORS allow-list |
 | `VELIORA_DEV_USER` | identity used by `Bearer dev` in dev mode |
-| `CLERK_ISSUER` | expected `iss` claim (Frontend API URL) |
-| `CLERK_JWKS_URL` | Clerk JWKS endpoint |
+| `CLERK_ISSUER` | your Clerk Frontend API URL (expected `iss`) |
+| `CLERK_JWKS_URL` | your Clerk JWKS endpoint |
 | `CLERK_AUTHORIZED_PARTIES` | comma-separated allowed `azp` origins |
 | `CLERK_AUDIENCE` | optional expected `aud` |
 | `CLERK_CLOCK_SKEW_SECONDS` | expiry/not-before tolerance (default `5`) |
@@ -61,25 +61,30 @@ The API listens on `http://127.0.0.1:8080` by default. Configuration lives in
 mode calls `sofuu.ai.complete`; `agent` mode defines the six department agents
 with `sofuu.agent.define` and runs them with `sofuu.agent.run`.
 
-## Authentication
+The repository ships no Clerk instance or maintainer domain. Set the `CLERK_*`
+values for your own instance, or replace the verifier as described below.
 
-Clerk is mandatory. There is no anonymous or authless product mode. Every
-`/v1` route except `/v1/health` requires a Clerk session token:
+## Authentication (reference adapter: Clerk)
+
+The gateway is fail-closed: every `/v1` route except `/v1/health` requires a
+bearer token. There is no anonymous route. The **reference adapter** verifies
+Clerk session tokens, but Clerk is not a project requirement and no Clerk
+instance or maintainer domain is shipped in the defaults.
 
 ```http
-Authorization: Bearer <Clerk session JWT>
+Authorization: Bearer <JWT>
 ```
 
-The gateway verifies the token locally against the Clerk JWKS with
-`sofuu.crypto.verifyJWT`. It checks the RS256 signature, `exp`, `nbf`,
-`iss` (when configured), `azp` (when the claim is present), and `sub`. No
-Clerk secret key is used. Clerk's native Android SDK may omit `azp` because
-there is no browser `Origin`; a missing `azp` is accepted, while a present
-`azp` must be allow-listed.
+The reference verifier checks the token locally against the configured public
+JWKS with `sofuu.crypto.verifyJWT`. It checks the RS256 signature, `exp`,
+`nbf`, `iss` (when configured), `azp` (when the claim is present), and `sub`.
+No Clerk secret key is used. Native mobile tokens may omit `azp` because there
+is no browser `Origin`; a missing `azp` is accepted, while a present `azp` must
+be allow-listed.
 
 - `GET /v1/me` returns the authenticated `user_id`, `session_id`, a minimal
   `account` record, and the token claims.
-- The account record contains only the Clerk `sub`, `first_seen_at`,
+- The account record contains only the authenticated `sub`, `first_seen_at`,
   `last_seen_at`, coarse `app_version`, and `platform`. Email, name, avatar,
   tokens, and application content are never stored there. Updates are
   throttled to one write per user every 15 minutes.
@@ -98,22 +103,41 @@ there is no browser `Origin`; a missing `azp` is accepted, while a present
 `VELIORA_AUTH_MODE=dev` is a deliberate test mode. It accepts
 `Authorization: Bearer dev:<user_id>` and logs a warning at startup. It is not
 an authless fallback: a missing token is still `401`. Do not ship a product
-client against dev mode; the Android app always uses Clerk.
+client against dev mode.
 
-### Clerk setup checklist
+### Using your own Clerk instance
 
-1. In Clerk, copy the Frontend API URL (or custom domain) and confirm the
-   JWKS URL is reachable:
-   `https://<frontend-api>/.well-known/jwks.json`.
-2. Set `CLERK_ISSUER` to that Frontend API URL and
-   `CLERK_AUTHORIZED_PARTIES` to the browser origin(s) that will call the API.
+1. In your Clerk dashboard, copy the Frontend API URL (or custom domain) and
+   confirm `https://<frontend-api>/.well-known/jwks.json` is reachable.
+2. Set `CLERK_ISSUER` to that Frontend API URL, `CLERK_JWKS_URL` to the JWKS
+   endpoint, and `CLERK_AUTHORIZED_PARTIES` to the browser origin(s) that will
+   call the API.
 3. Add the same origins to `VELIORA_APP_ORIGINS`.
-4. Have the client send the Clerk session token as a Bearer token. Clerk's
-   session cookie is not used by this API.
+4. Have the client send the session token as a Bearer token. Clerk's session
+   cookie is not used by this API.
 
-If the JWKS endpoint is temporarily unreachable, the service starts and
-returns `503 auth_unavailable` for authenticated requests until a retry
-succeeds. A cached key set is used during transient refresh failures.
+The gateway starts even when the issuer/JWKS values are empty for `dev` mode.
+In `clerk` mode, an empty `CLERK_JWKS_URL` is a startup error rather than an
+unauthenticated fallback.
+
+### Replacing the auth provider
+
+Keep the gateway contract (a verified bearer token, a stable `sub`, and
+standard claims) and replace:
+
+- `auth/clerk.js` — the verifier. If your provider does not issue RS256 JWTs,
+  replace the `sofuu.crypto.verifyJWT` call and the claim checks.
+- `core/config.js` — `authMode` and the verifier settings.
+- The Android side: `veliora/app/src/main/java/com/veliora/ui/auth/` and
+  `EmbeddedSofuu.authToken()`.
+
+The routes, ownership checks, account projection, and SSE token policy do not
+depend on Clerk.
+
+If the JWKS endpoint is temporarily unreachable, the reference verifier starts
+the service and returns `503 auth_unavailable` for authenticated requests
+until a retry succeeds. A cached key set is used during transient refresh
+failures.
 
 ## Storage
 

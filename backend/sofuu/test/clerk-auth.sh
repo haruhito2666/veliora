@@ -49,6 +49,7 @@ echo "ok: JWKS on http://127.0.0.1:$JWKS_PORT/jwks.json"
 echo "== start backend in clerk mode =="
 VELIORA_PORT="$PORT" VELIORA_STORE="$STORE" VELIORA_STEP_DELAY_MS=0 \
   VELIORA_AUTH_MODE=clerk \
+  VELIORA_APP_ORIGINS="$ORIGIN" \
   CLERK_ISSUER="$ORIGIN" \
   CLERK_JWKS_URL="http://127.0.0.1:$JWKS_PORT/jwks.json" \
   CLERK_AUTHORIZED_PARTIES="$ORIGIN" \

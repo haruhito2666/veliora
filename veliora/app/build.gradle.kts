@@ -59,14 +59,18 @@ android {
 
         // The app runs the Veliora pipeline inside libsofuu, so there is no
         // remote API base. These values configure the embedded runtime.
+        //
+        // The reference app uses Clerk, but no Clerk instance is baked into
+        // this repository. Set these for your own Clerk application (or wire
+        // another provider; see README "Auth provider").
         val clerkIssuer = (project.findProperty("VELIORA_CLERK_ISSUER") as String?)
             ?: System.getenv("VELIORA_CLERK_ISSUER")
             ?: System.getenv("CLERK_ISSUER")
-            ?: "https://clerk.veliora-app.rikuhana.com"
+            ?: ""
         val clerkJwks = (project.findProperty("VELIORA_CLERK_JWKS_URL") as String?)
             ?: System.getenv("VELIORA_CLERK_JWKS_URL")
             ?: System.getenv("CLERK_JWKS_URL")
-            ?: "$clerkIssuer/.well-known/jwks.json"
+            ?: if (clerkIssuer.isNotBlank()) "$clerkIssuer/.well-known/jwks.json" else ""
         val clerkAuthorizedParties = (project.findProperty("VELIORA_CLERK_AUTHORIZED_PARTIES") as String?)
             ?: System.getenv("VELIORA_CLERK_AUTHORIZED_PARTIES")
             ?: System.getenv("CLERK_AUTHORIZED_PARTIES")
@@ -107,6 +111,13 @@ android {
             ?: ""
         val escapedClerkKey = clerkKey.replace("\\", "\\\\").replace("\"", "\\\"")
         buildConfigField("String", "CLERK_PUBLISHABLE_KEY", "\"$escapedClerkKey\"")
+
+        if (clerkKey.isNotBlank() && (clerkIssuer.isBlank() || clerkJwks.isBlank())) {
+            logger.warn(
+                "VELIORA_CLERK_ISSUER / VELIORA_CLERK_JWKS_URL are empty. " +
+                    "The app will show the auth-configuration screen until both are set.",
+            )
+        }
     }
 
     buildTypes {

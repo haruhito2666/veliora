@@ -10,20 +10,18 @@ const DEFAULTS = {
   maxResearchCycles: 3,
   stepDelayMs: 25,
   fallbackToScripted: true,
-  // Authentication is fail-closed: Clerk is the default. `dev` is an
-  // explicit local-test mode and still requires a bearer token.
+  // Authentication is fail-closed. The reference adapter verifies Clerk
+  // session tokens; a fork can replace auth/clerk.js with another provider.
+  // `dev` is an explicit local-test mode and still requires a bearer token.
+  // No Clerk instance, issuer, or JWKS is baked into these defaults: every
+  // deployment supplies its own via veliora.json or environment variables.
   authMode: "clerk",
-  appOrigins: [
-    "https://veliora-app.rikuhana.com",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ],
+  appOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
   devUser: "user_dev_local",
   clerk: {
-    issuer: "https://clerk.veliora-app.rikuhana.com",
-    jwksUrl: "https://clerk.veliora-app.rikuhana.com/.well-known/jwks.json",
+    issuer: "",
+    jwksUrl: "",
     authorizedParties: [
-      "https://veliora-app.rikuhana.com",
       "http://localhost",
       "http://localhost:3000",
       "http://127.0.0.1:3000",
@@ -66,7 +64,7 @@ function list(value, fallback) {
     .filter(Boolean);
 }
 
-export async function loadConfig() {
+export async function loadConfig(overrides = {}) {
   const file = await readConfigFile();
   const env = (typeof process !== "undefined" && process.env) || {};
   const config = { ...DEFAULTS, ...file };
@@ -125,6 +123,20 @@ export async function loadConfig() {
     config.clerk.jwksTimeoutMs = number(env.CLERK_JWKS_TIMEOUT_MS, config.clerk.jwksTimeoutMs);
   }
 
+  // Callers such as the embedded entrypoint may inject a complete config,
+  // including authMode. Apply it before validation so an injected `dev` mode
+  // does not trip the Clerk JWKS requirement.
+  if (overrides && typeof overrides === "object") {
+    const baseClerk = config.clerk;
+    Object.assign(config, overrides);
+    config.clerk = { ...baseClerk, ...(overrides.clerk || {}) };
+    config.appOrigins = list(config.appOrigins, DEFAULTS.appOrigins);
+    config.clerk.authorizedParties = list(
+      config.clerk.authorizedParties,
+      DEFAULTS.clerk.authorizedParties,
+    );
+  }
+
   config.port = Math.trunc(number(config.port, 8080));
   config.maxResearchCycles = Math.max(1, Math.trunc(number(config.maxResearchCycles, 3)));
   config.confidenceThreshold = number(config.confidenceThreshold, 0.72);
@@ -137,7 +149,10 @@ export async function loadConfig() {
   config.clerk.jwksCacheMs = Math.max(1, Math.trunc(number(config.clerk.jwksCacheMs, 3600000)));
   config.clerk.jwksTimeoutMs = Math.max(1000, Math.trunc(number(config.clerk.jwksTimeoutMs, 10000)));
   if (config.authMode === "clerk" && !config.clerk.jwksUrl) {
-    throw new Error("CLERK_JWKS_URL is required when VELIORA_AUTH_MODE=clerk");
+    throw new Error(
+      "CLERK_JWKS_URL is required when VELIORA_AUTH_MODE=clerk; " +
+        "set your auth provider's JWKS URL or use VELIORA_AUTH_MODE=dev for local tests",
+    );
   }
   return config;
 }

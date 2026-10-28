@@ -30,22 +30,12 @@ function lowerHeaders(value) {
   return out;
 }
 
-function mergeConfig(config, injected) {
-  const options = injected || {};
-  // Capture the resolved Clerk defaults before Object.assign replaces the
-  // whole nested object with the injected subset.
-  const baseClerk = config.clerk || {};
-  Object.assign(config, options);
-  config.clerk = { ...baseClerk, ...(options.clerk || {}) };
-  // No listener, no CORS surface, and no heartbeat in embedded mode.
-  config.host = "127.0.0.1";
-  return config;
-}
-
 async function init(options) {
   if (state) return { ready: true, reused: true };
 
-  const config = mergeConfig(await loadConfig(), options);
+  const config = await loadConfig(options);
+  // No listener and no CORS surface in embedded mode.
+  config.host = "127.0.0.1";
   const auth = new Authenticator(config);
   await auth.initialize();
 

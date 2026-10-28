@@ -11,16 +11,14 @@
   "fallbackToScripted": true,
   "authMode": "clerk",
   "appOrigins": [
-    "https://veliora-app.rikuhana.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
   ],
   "devUser": "user_dev_local",
   "clerk": {
-    "issuer": "https://clerk.veliora-app.rikuhana.com",
-    "jwksUrl": "https://clerk.veliora-app.rikuhana.com/.well-known/jwks.json",
+    "issuer": "",
+    "jwksUrl": "",
     "authorizedParties": [
-      "https://veliora-app.rikuhana.com",
       "http://localhost",
       "http://localhost:3000",
       "http://127.0.0.1:3000"

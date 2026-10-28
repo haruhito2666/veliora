@@ -1,4 +1,9 @@
-// Clerk session-token verification for the Veliora API.
+// Reference auth adapter: Clerk session-token verification for the Veliora API.
+//
+// Clerk is the reference provider, not a project requirement. The gateway
+// contract is deliberately small: verify the bearer token and return a stable
+// `sub` plus the token claims. A fork can replace this module with another
+// provider and keep the routes, ownership model, and SSE token rules unchanged.
 //
 // Clerk's frontend sends an RS256 JWT in `Authorization: Bearer <token>`.
 // The token is verified locally against the project's public JWKS using the
@@ -6,11 +11,13 @@
 // and no network round-trip happens per request.
 //
 // Modes:
-//   clerk (default) — verify against Clerk JWKS; every request needs a token.
+//   clerk (default) — verify against the configured issuer/JWKS; every request
+//                     needs a token. The mode name is the reference adapter's,
+//                     not a product-wide auth requirement.
 //   dev             — local/tests only. Accepts `Bearer dev:<user_id>`.
 //
 // Dev mode is deliberately explicit: it is never enabled by simply omitting
-// Clerk configuration, and it logs a warning at startup.
+// auth configuration, and it logs a warning at startup.
 
 const DEV_PREFIX = "dev:";
 
