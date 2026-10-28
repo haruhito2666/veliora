@@ -86,10 +86,11 @@ make install-hooks
 
 `make check-secrets` audits `HEAD` and the Git index. It prints only
 `file:line`, never the matched value, and refuses credential-shaped strings and
-sensitive filenames. If a credential is ever pushed, rotate it immediately; a
-history rewrite does not make it private. The Clerk publishable key
-(`pk_live_...`) is public, but the secret key (`sk_...`) is not needed by this
-app and must never enter the repository or the APK.
+sensitive filenames. The same scan runs in GitHub Actions on every push to
+`main` and every pull request. If a credential is ever pushed, rotate it
+immediately; a history rewrite does not make it private. The Clerk publishable
+key (`pk_live_...`) is public, but the secret key (`sk_...`) is not needed by
+this app and must never enter the repository or the APK.
 
 The app runs entirely on the device; there is no API base to configure. The
 gateway bundle is committed at
