@@ -41,6 +41,7 @@ The API listens on `http://127.0.0.1:8080` by default. Configuration lives in
 | `VELIORA_STORE` | persistent store directory |
 | `VELIORA_MODE` | `scripted`, `sofuu`, or `agent` |
 | `VELIORA_PROVIDER` / `VELIORA_MODEL` | provider + model for `sofuu` mode |
+| `VELIORA_BASE_URL` | optional provider or local model endpoint |
 | `VELIORA_CONFIDENCE_THRESHOLD` | confidence threshold (default `0.72`) |
 | `VELIORA_MAX_CYCLES` | research loop cap (default `3`) |
 | `VELIORA_STEP_DELAY_MS` | pacing delay between worker steps |

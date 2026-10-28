@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.veliora.app
 import com.veliora.data.DepartmentStatus
 import com.veliora.data.DeptState
@@ -47,10 +49,12 @@ import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.EmptyState
 import com.veliora.ui.components.EvidenceRow
 import com.veliora.ui.components.GradientButton
+import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.PhaseIndicator
 import com.veliora.ui.components.ProgressBar
 import com.veliora.ui.components.ScrollableHeader
 import com.veliora.ui.components.SectionHeader
+import com.veliora.ui.components.StatusBadge
 import com.veliora.ui.components.VelioraCard
 import com.veliora.ui.theme.Indigo50
 import com.veliora.ui.theme.Indigo500
@@ -61,6 +65,8 @@ import com.veliora.ui.theme.Slate500
 import com.veliora.ui.theme.Slate700
 import com.veliora.ui.theme.Slate900
 import com.veliora.ui.theme.Spacing
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 // ═══════════════════════════════════════════════════════════════════════
 // InvestigationScreen — the flagship investigation view.
@@ -76,12 +82,21 @@ fun InvestigationScreen(
 ) {
     val context = LocalContext.current
     val app = remember { context.app }
+    val store = app.orgStore
+    val liveInvestigations by store.investigations.collectAsStateWithLifecycle()
+    val departmentStatuses by store.departmentStatuses.collectAsStateWithLifecycle()
+    val storeError by store.error.collectAsStateWithLifecycle()
 
     var investigation by remember { mutableStateOf<Investigation?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var evidenceFeed by remember { mutableStateOf<List<Evidence>>(emptyList()) }
+    var evidenceError by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(orgId, investigationId) {
+    LiveOrgEffect(orgId, store)
+
+    LaunchedEffect(orgId, investigationId, reloadKey) {
         loading = true
         error = null
         runCatching { app.repository.investigation(orgId, investigationId) }
@@ -90,21 +105,40 @@ fun InvestigationScreen(
         loading = false
     }
 
-    var evidenceFeed by remember { mutableStateOf<List<Evidence>>(emptyList()) }
-
-    LaunchedEffect(investigation?.id) {
-        val inv = investigation ?: return@LaunchedEffect
-        runCatching { app.repository.evidence(orgId, inv.id) }
-            .onSuccess { evidenceFeed = it.map(Mapper::toEvidence) }
+    LaunchedEffect(orgId, investigationId, reloadKey) {
+        while (isActive) {
+            runCatching { app.repository.evidence(orgId, investigationId) }
+                .onSuccess {
+                    evidenceFeed = it.map(Mapper::toEvidence)
+                    evidenceError = null
+                }
+                .onFailure { e ->
+                    if (evidenceFeed.isEmpty()) {
+                        evidenceError = e.message ?: "Failed to load evidence"
+                    }
+                }
+            val terminal = store.investigations.value
+                .find { it.id == investigationId }
+                ?.isTerminal == true
+            if (terminal) break
+            delay(1_000)
+        }
     }
 
-    val data = investigation
+    val liveInvestigation = liveInvestigations.find { it.id == investigationId }
+    val data = (liveInvestigation ?: investigation)?.let { inv ->
+        if (departmentStatuses.isNotEmpty() && !inv.isTerminal) {
+            inv.copy(departmentStatuses = departmentStatuses)
+        } else {
+            inv
+        }
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         when {
-            loading -> {
+            loading && data == null -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
@@ -113,15 +147,25 @@ fun InvestigationScreen(
                 }
             }
             data == null -> {
-                Box(
+                Column(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentAlignment = Alignment.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     EmptyState(
                         icon = "▣",
                         title = "Investigation unavailable",
-                        subtitle = error ?: "This investigation could not be loaded.",
+                        subtitle = error ?: storeError ?: "This investigation could not be loaded.",
                     )
+                    Button(
+                        onClick = {
+                            store.clearActionError()
+                            store.retry()
+                            reloadKey += 1
+                        },
+                    ) {
+                        Text("Retry")
+                    }
                 }
             }
             else -> {
@@ -156,27 +200,40 @@ fun InvestigationScreen(
                                 modifier = Modifier.padding(bottom = Spacing.sm),
                             )
                             Spacer(Modifier.height(Spacing.lg))
-                            PhaseIndicator(
-                                currentPhase = data.phase,
-                                phaseProgress = data.phaseProgress,
-                            )
-                            Spacer(Modifier.height(Spacing.lg))
-                            // Progress bar + % — one baseline-aligned row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(Spacing.smMd),
+                            if (data.phase == InvestigationPhase.CANCELLED ||
+                                data.phase == InvestigationPhase.FAILED
                             ) {
-                                ProgressBar(
-                                    progress = data.progress,
-                                    modifier = Modifier.weight(1f),
+                                StatusBadge(
+                                    text = data.phase.label.uppercase(),
+                                    color = if (data.phase == InvestigationPhase.FAILED) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        Slate500
+                                    },
                                 )
-                                Text(
-                                    text = "${data.progress}%",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Indigo500,
-                                    fontWeight = FontWeight.SemiBold,
+                            } else {
+                                PhaseIndicator(
+                                    currentPhase = data.phase,
+                                    phaseProgress = data.phaseProgress,
                                 )
+                                Spacer(Modifier.height(Spacing.lg))
+                                // Progress bar + % — one baseline-aligned row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(Spacing.smMd),
+                                ) {
+                                    ProgressBar(
+                                        progress = data.progress,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = "${data.progress}%",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = Indigo500,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
                             }
                             if (data.elapsedMinutes > 0 || data.etaMinutes > 0) {
                                 Spacer(Modifier.height(Spacing.xs))
@@ -220,23 +277,32 @@ fun InvestigationScreen(
                         SectionHeader(title = "Evidence Feed", isLive = evidenceFeed.isNotEmpty())
                         VelioraCard(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(Spacing.mdLg)) {
-                                evidenceFeed.forEachIndexed { index, evidence ->
-                                    val isNewest = index == evidenceFeed.lastIndex
-                                    Box(
-                                        // Vertical padding only — horizontal stays
-                                        // flush so the highlighted row's content
-                                        // aligns with every other feed row, while
-                                        // the extra height keeps the rounded band
-                                        // clear of the text.
-                                        modifier = if (isNewest)
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(Radii.sm))
-                                                .background(Indigo50)
-                                                .padding(vertical = Spacing.sm)
-                                        else Modifier
-                                    ) {
-                                        EvidenceRow(evidence = evidence)
+                                if (evidenceFeed.isEmpty()) {
+                                    EmptyState(
+                                        icon = "◌",
+                                        title = "No evidence yet",
+                                        subtitle = evidenceError
+                                            ?: "Evidence appears as departments report it.",
+                                    )
+                                } else {
+                                    evidenceFeed.forEachIndexed { index, evidence ->
+                                        val isNewest = index == evidenceFeed.lastIndex
+                                        Box(
+                                            // Vertical padding only — horizontal stays
+                                            // flush so the highlighted row's content
+                                            // aligns with every other feed row, while
+                                            // the extra height keeps the rounded band
+                                            // clear of the text.
+                                            modifier = if (isNewest)
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(Radii.sm))
+                                                    .background(Indigo50)
+                                                    .padding(vertical = Spacing.sm)
+                                            else Modifier
+                                        ) {
+                                            EvidenceRow(evidence = evidence)
+                                        }
                                     }
                                 }
                             }
@@ -244,14 +310,29 @@ fun InvestigationScreen(
                     }
 
                     // ── View Board Report ────────────────────────────────────────
-                    // Always visible — the board report streams while the
-                    // investigation is still working.
+                    // The report only exists after a successful completion.
                     item {
                         Spacer(Modifier.height(Spacing.xl))
-                        GradientButton(
-                            text = "View Board Report",
-                            onClick = onReportClick,
-                        )
+                        when {
+                            data.phase == InvestigationPhase.REPORT && data.isTerminal ->
+                                GradientButton(
+                                    text = "View Board Report",
+                                    onClick = onReportClick,
+                                )
+                            data.phase == InvestigationPhase.CANCELLED ||
+                                data.phase == InvestigationPhase.FAILED ->
+                                Text(
+                                    text = "This investigation ended without a board report.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Slate500,
+                                )
+                            else ->
+                                GradientButton(
+                                    text = "Report available when complete",
+                                    onClick = {},
+                                    enabled = false,
+                                )
+                        }
                     }
 
                 }

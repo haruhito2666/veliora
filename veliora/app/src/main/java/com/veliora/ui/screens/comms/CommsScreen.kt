@@ -63,8 +63,9 @@ fun CommsScreen(
     var allThreads by remember { mutableStateOf<List<CaspianThread>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(orgId) {
+    LaunchedEffect(orgId, reloadKey) {
         loading = true
         error = null
         runCatching { app.repository.communications(orgId) }
@@ -96,6 +97,11 @@ fun CommsScreen(
             item {
                 ScrollableHeader(
                     title = "External Communications",
+                    actions = {
+                        TextButton(onClick = { reloadKey += 1 }) {
+                            Text("Refresh")
+                        }
+                    },
                 )
             }
 

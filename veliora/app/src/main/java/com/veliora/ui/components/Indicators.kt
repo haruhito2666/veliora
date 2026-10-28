@@ -1,7 +1,5 @@
 package com.veliora.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.veliora.data.InvestigationPhase
-import com.veliora.data.VoteTally
 import com.veliora.ui.theme.Amber50
 import com.veliora.ui.theme.Amber500
 import com.veliora.ui.theme.Green50
@@ -45,7 +42,6 @@ import com.veliora.ui.theme.Slate200
 import com.veliora.ui.theme.Slate300
 import com.veliora.ui.theme.Slate400
 import com.veliora.ui.theme.Slate500
-import com.veliora.ui.theme.Slate700
 import com.veliora.ui.theme.Slate900
 import com.veliora.ui.theme.Spacing
 
@@ -186,103 +182,6 @@ fun TrustBar(
                 }
             }
         }
-    }
-}
-
-// ── VoteTallyBar ────────────────────────────────────────────────────
-// Animated vote bar with threshold line. Green = for, Red = against,
-// Gray = abstain. Threshold line is dashed.
-
-@Composable
-fun VoteTallyBar(
-    tally: VoteTally,
-    modifier: Modifier = Modifier,
-) {
-    val total = tally.total.coerceAtLeast(1)
-    val animatedFor by animateFloatAsState(
-        targetValue = tally.forCount.toFloat() / total,
-        animationSpec = tween(600),
-        label = "forAnim",
-    )
-    val animatedAgainst by animateFloatAsState(
-        targetValue = tally.againstCount.toFloat() / total,
-        animationSpec = tween(600),
-        label = "againstAnim",
-    )
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        // Bar — BoxWithConstraints so the threshold line scales with width
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(28.dp)
-                .clip(RoundedCornerShape(Radii.sm))
-                .background(Slate100),
-        ) {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                // For
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(animatedFor)
-                        .height(28.dp)
-                        .background(if (tally.thresholdMet) Green500 else Indigo500)
-                )
-                // Against
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(animatedAgainst)
-                        .height(28.dp)
-                        .background(Red500)
-                )
-            }
-            // Threshold line — positioned at (threshold × real width)
-            Box(
-                modifier = Modifier
-                    .offset(x = maxWidth * tally.threshold)
-                    .width(2.dp)
-                    .height(28.dp)
-                    .background(Slate900)
-            )
-        }
-        // Counts
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-        ) {
-            VoteCount(label = "For", count = tally.forCount, color = if (tally.thresholdMet) Green500 else Indigo500)
-            VoteCount(label = "Against", count = tally.againstCount, color = Red500)
-            VoteCount(label = "Abstain", count = tally.abstainCount, color = Slate400)
-        }
-        if (tally.thresholdMet) {
-            Text(
-                text = "DECISION REACHED — threshold met",
-                style = MaterialTheme.typography.labelSmall,
-                color = Green500,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-}
-
-@Composable
-private fun VoteCount(label: String, count: Int, color: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
-        Text(
-            text = "$label: $count",
-            style = MaterialTheme.typography.labelSmall,
-            color = Slate700,
-        )
     }
 }
 

@@ -79,6 +79,17 @@ const investigation = JSON.parse((await request(
   { prompt: "Validate the embedded runtime.", depth: "standard" },
 )).body);
 
+const liveStatus = JSON.parse((await request(
+  "GET",
+  `/v1/organizations/${orgId}/status`,
+)).body);
+if (liveStatus.counts.investigations_active !== 1) {
+  throw new Error("status did not report the active investigation");
+}
+if (!liveStatus.departments.some((department) => department.worker_state !== "idle")) {
+  throw new Error("status did not report any working or queued department");
+}
+
 let state = "";
 for (let i = 0; i < 80; i += 1) {
   await sofuu.veliora.tick({ ms: 100 });

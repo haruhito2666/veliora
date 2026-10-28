@@ -51,7 +51,7 @@ async function init(options) {
 
   const store = new Store(config.storePath);
   const bus = new EventBus(store, { heartbeat: false });
-  if (config.mode === "agent") defineAgents();
+  if (config.mode === "agent") defineAgents(config);
 
   const llm = new LLM(config);
   const orchestrator = new InvestigationOrchestrator({ store, bus, llm, config });

@@ -9,14 +9,11 @@ import com.veliora.data.api.CreateOrgResponse
 import com.veliora.data.api.EvidenceDto
 import com.veliora.data.api.EvolutionEventDto
 import com.veliora.data.api.InvestigationDto
-import com.veliora.data.api.ListResponse
-import com.veliora.data.api.MeetingDto
 import com.veliora.data.api.OrgListResponse
 import com.veliora.data.api.OrgSnapshot
 import com.veliora.data.api.OrgStatus
 import com.veliora.data.api.ReportDto
 import com.veliora.data.api.TemplatesResponse
-import com.veliora.data.api.WorkerDto
 import com.veliora.data.sofuu.EmbeddedSofuu
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -67,11 +64,6 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
     suspend fun evolutionEvents(orgId: String): List<EvolutionEventDto> =
         json.decodeFromString(sofuu.request("GET", "${orgPath(orgId)}/evolution/events").body)
 
-    suspend fun workers(orgId: String): List<WorkerDto> =
-        json.decodeFromString<ListResponse<WorkerDto>>(
-            sofuu.request("GET", "${orgPath(orgId)}/workers").body,
-        ).data
-
     suspend fun communications(orgId: String): List<CommunicationThreadDto> =
         json.decodeFromString(sofuu.request("GET", "${orgPath(orgId)}/communications").body)
 
@@ -97,11 +89,6 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
             sofuu.request("GET", investigationPath(orgId, invId)).body,
         )
 
-    suspend fun cancelInvestigation(orgId: String, invId: String): Map<String, Boolean> =
-        json.decodeFromString(
-            sofuu.request("POST", "${investigationPath(orgId, invId)}/cancel").body,
-        )
-
     suspend fun evidence(orgId: String, invId: String): List<EvidenceDto> =
         json.decodeFromString(
             sofuu.request("GET", "${investigationPath(orgId, invId)}/evidence").body,
@@ -112,16 +99,11 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
             sofuu.request("GET", "${investigationPath(orgId, invId)}/report").body,
         )
 
-    suspend fun meetings(orgId: String): List<MeetingDto> =
-        json.decodeFromString(sofuu.request("GET", "${orgPath(orgId)}/meetings").body)
-
-    suspend fun meeting(orgId: String, mtgId: String): MeetingDto =
-        json.decodeFromString(
-            sofuu.request("GET", "${orgPath(orgId)}/meetings/${segment(mtgId)}").body,
-        )
-
     /** Advances the embedded pipeline while a run is in progress. */
     suspend fun pump() = sofuu.tick(100)
+
+    /** Restarts the embedded runtime after a failed initialization. */
+    fun retrySofuu() = sofuu.retry()
 
     suspend fun sdkCapabilities() = sofuu.capabilities()
 
@@ -136,11 +118,4 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
 
     private fun segment(value: String): String =
         URLEncoder.encode(value, "UTF-8").replace("+", "%20")
-}
-
-/** Simple UI state wrapper for suspend loads. */
-sealed class UiState<out T> {
-    data object Loading : UiState<Nothing>()
-    data class Error(val message: String) : UiState<Nothing>()
-    data class Success<T>(val data: T) : UiState<T>()
 }

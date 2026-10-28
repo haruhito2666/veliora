@@ -5,12 +5,6 @@ import kotlinx.serialization.Serializable
 
 // ── Organizations ───────────────────────────────────────────────────────
 
-/** Generic list wrapper for endpoints returning `{ "data": [...] }`. */
-@Serializable
-data class ListResponse<T>(
-    val data: List<T> = emptyList(),
-)
-
 @Serializable
 data class CreateOrgRequest(
     val name: String,
@@ -194,31 +188,6 @@ data class ChallengeDto(
     val resolution: String = "",
 )
 
-// ── Meetings ────────────────────────────────────────────────────────────
-
-@Serializable
-data class MeetingDto(
-    @SerialName("meeting_id") val meetingId: String,
-    @SerialName("organization_id") val organizationId: String = "",
-    @SerialName("investigation_id") val investigationId: String = "",
-    val title: String,
-    val state: String,
-    val agenda: List<AgendaItemDto> = emptyList(),
-    val participants: List<String> = emptyList(),
-    val chair: String = "",
-    @SerialName("called_at") val calledAt: String = "",
-    @SerialName("started_at") val startedAt: String? = null,
-    @SerialName("ended_at") val endedAt: String? = null,
-)
-
-@Serializable
-data class AgendaItemDto(
-    val id: String = "",
-    val title: String,
-    val type: String = "status",
-    @SerialName("time_budget_min") val timeBudgetMin: Int = 5,
-)
-
 // ── Evolution ───────────────────────────────────────────────────────────
 
 @Serializable
@@ -279,17 +248,4 @@ data class ReportDto(
     val opportunities: List<String> = emptyList(),
     @SerialName("next_steps") val nextSteps: List<String> = emptyList(),
     @SerialName("full_discussion") val fullDiscussion: String = "",
-)
-
-// ── Error envelope ──────────────────────────────────────────────────────
-
-@Serializable
-data class ApiError(
-    val error: ApiErrorBody = ApiErrorBody(),
-)
-
-@Serializable
-data class ApiErrorBody(
-    val code: String = "",
-    val message: String = "",
 )

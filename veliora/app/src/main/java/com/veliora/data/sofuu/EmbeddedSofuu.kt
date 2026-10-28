@@ -40,14 +40,43 @@ class EmbeddedSofuu(private val context: Context) {
     @Volatile
     private var bridge: SofuuBridge? = null
 
-    private val ready = CompletableDeferred<Result<Unit>>()
-    private val started = AtomicBoolean(false)
+    private val startLock = Any()
+    private val startInFlight = AtomicBoolean(false)
+
+    @Volatile
+    private var ready = CompletableDeferred<Result<Unit>>()
+
+    @Volatile
+    private var initialized = false
 
     /** Starts the runtime once; safe to call from Application.onCreate(). */
-    fun start() {
-        if (!started.compareAndSet(false, true)) return
-        scope.launch {
-            ready.complete(runCatching { initialize() })
+    fun start() = launchStart(force = false)
+
+    /** Retries initialization after a failure. */
+    fun retry() = launchStart(force = true)
+
+    private fun launchStart(force: Boolean) {
+        synchronized(startLock) {
+            if (initialized) return
+            if (startInFlight.get()) return
+            if (!force && ready.isCompleted) return
+            if (!startInFlight.compareAndSet(false, true)) return
+            if (force) ready = CompletableDeferred()
+
+            val attempt = ready
+            scope.launch {
+                val result = runCatching { initialize() }
+                attempt.complete(result)
+                if (result.isSuccess) {
+                    initialized = true
+                } else {
+                    withContext(engine) {
+                        runCatching { bridge?.close() }
+                    }
+                    bridge = null
+                }
+                startInFlight.set(false)
+            }
         }
     }
 
@@ -59,13 +88,29 @@ class EmbeddedSofuu(private val context: Context) {
         withContext(engine) {
             val root = File(context.filesDir, "sofuu").apply { mkdirs() }
             val configRoot = File(root, "config").apply { mkdirs() }
+            val providerKeys = readProviderKeys(root)
 
-            val runtime = SofuuBridge(
-                JSONObject()
-                    .put("embedded", true)
-                    .put("config_root", configRoot.absolutePath)
-                    .toString(),
-            )
+            val runtimeConfig = JSONObject()
+                .put("embedded", true)
+                .put("config_root", configRoot.absolutePath)
+                // Agent memory must live in the app's private data directory.
+                // The Sofuu default is <cwd>/.sofuu/brain/brain.qtsq, which is
+                // not writable in an Android app process.
+                .put("brain_path", File(root, "brain.qtsq").absolutePath)
+            if (BuildConfig.EMBEDDED_PROVIDER.isNotBlank()) {
+                runtimeConfig.put("provider", BuildConfig.EMBEDDED_PROVIDER)
+            }
+            if (BuildConfig.EMBEDDED_MODEL.isNotBlank()) {
+                runtimeConfig.put("model", BuildConfig.EMBEDDED_MODEL)
+            }
+            if (BuildConfig.EMBEDDED_BASE_URL.isNotBlank()) {
+                runtimeConfig.put("base_url", BuildConfig.EMBEDDED_BASE_URL)
+            }
+            if (providerKeys.length() > 0) {
+                runtimeConfig.put("api_keys", providerKeys)
+            }
+
+            val runtime = SofuuBridge(runtimeConfig.toString())
             bridge = runtime
 
             val eval = runtime.eval(bundle)
@@ -86,6 +131,10 @@ class EmbeddedSofuu(private val context: Context) {
                 .put("stepDelayMs", BuildConfig.EMBEDDED_STEP_DELAY_MS)
                 .put("provider", BuildConfig.EMBEDDED_PROVIDER)
                 .put("model", BuildConfig.EMBEDDED_MODEL)
+                .put("baseUrl", BuildConfig.EMBEDDED_BASE_URL)
+                // A real-inference mode must never silently degrade to the
+                // scripted fixtures: surface provider/agent failures instead.
+                .put("fallbackToScripted", BuildConfig.EMBEDDED_MODE == "scripted")
                 .put("appOrigins", JSONArray().put("http://localhost"))
                 .put(
                     "clerk",
@@ -120,6 +169,24 @@ class EmbeddedSofuu(private val context: Context) {
             .filter(String::isNotEmpty)
             .forEach { parties.put(it) }
         return parties
+    }
+
+    /**
+     * Optional provider keys, provisioned into the app's private data
+     * directory (not shipped in the APK):
+     *
+     *   files/sofuu/provider-keys.json
+     *   {"openai":"sk-...","anthropic":"sk-ant-..."}
+     *
+     * Keeping this out of BuildConfig prevents a release APK from embedding
+     * a provider secret.
+     */
+    private fun readProviderKeys(root: File): JSONObject {
+        val file = File(root, "provider-keys.json")
+        if (!file.isFile) return JSONObject()
+        return runCatching {
+            JSONObject(file.readText())
+        }.getOrDefault(JSONObject())
     }
 
     suspend fun request(method: String, path: String, body: String? = null): Response {
@@ -183,17 +250,6 @@ class EmbeddedSofuu(private val context: Context) {
                 .put("abi", runtime.abiVersion)
                 .put("sha256", runtime.sha256("abc") ?: "")
                 .put("embeddingDims", vector?.size ?: 0)
-        }
-    }
-
-    fun close() {
-        val runtime = bridge ?: return
-        bridge = null
-        scope.launch {
-            withContext(engine) {
-                runCatching { runtime.call("veliora.close", "{}") }
-                runtime.close()
-            }
         }
     }
 

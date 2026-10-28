@@ -28,11 +28,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.veliora.app
 import com.veliora.data.Decision
 import com.veliora.data.Worker
 import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.EmptyState
+import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.ScrollableHeader
 import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.components.TrustBar
@@ -53,10 +55,14 @@ fun WorkerDetailScreen(
 ) {
     val context = LocalContext.current
     val app = remember { context.app }
+    val store = app.orgStore
+    val liveOrg by store.organization.collectAsStateWithLifecycle()
 
     var worker by remember { mutableStateOf<Worker?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    LiveOrgEffect(orgId, store)
 
     LaunchedEffect(orgId, workerId) {
         loading = true
@@ -71,13 +77,16 @@ fun WorkerDetailScreen(
         loading = false
     }
 
-    val data = worker
+    val data = liveOrg?.departments
+        ?.flatMap { it.workers }
+        ?.find { it.id == workerId }
+        ?: worker
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { innerPadding ->
         when {
-            loading -> {
+            loading && data == null -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

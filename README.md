@@ -4,7 +4,7 @@
 
 Veliora turns a goal into an investigation run by an organization of specialized departments. Departments gather evidence, challenge claims, debate, vote, and expose the resulting state and decisions through a native Android dashboard.
 
-> **Alpha:** Clerk sign-in is mandatory. The Android app has no anonymous mode: it launches into Clerk's native sign-in/sign-up flow and composes the app only after a session exists. The embedded gateway verifies the Clerk session token against the Clerk JWKS with `sofuu.crypto.verifyJWT` before owner-scoping local records. It needs a Clerk publishable key at build time and the Native API enabled in the Clerk Dashboard.
+> **Alpha:** Clerk sign-in is mandatory. The Android app has no anonymous mode: it launches into a custom Clerk sign-in/sign-up flow and composes the app only after an active session exists. The embedded gateway verifies the Clerk session token against the Clerk JWKS with `sofuu.crypto.verifyJWT` before owner-scoping local records. It needs a Clerk publishable key at build time and the Native API enabled in the Clerk Dashboard.
 
 ## Runtime: Sofuu, on-device
 
@@ -15,7 +15,7 @@ Veliora's application logic is the JavaScript gateway in `backend/sofuu/`. On An
 | Gateway routes | In-process `sofuu.veliora.request` over the same JS gateway |
 | Department workers | `sofuu.agent` (`define`, `run`, `runMany`) |
 | Durable organization, investigation, task, evidence, vote, and report records | `sofuu.storage` strict-schema tables in QTSQ segments |
-| Institutional memory and semantic recall | `sofuu.memory` (CMA v2 / QTSQ) |
+| Institutional memory and semantic recall | `sofuu.memory` (not wired in this alpha) |
 | Local or cloud inference | `sofuu.ai` (`streamLocal` for local models, `stream` / `complete` for providers) |
 | Web research | `sofuu.web` |
 | Session auth | `sofuu.crypto.verifyJWT` against the Clerk JWKS |
@@ -27,9 +27,10 @@ Veliora's application logic is the JavaScript gateway in `backend/sofuu/`. On An
 - The embedded gateway runs the full investigation pipeline end to end in deterministic `scripted` mode: research, cross-department challenge, two-round debate, synthesis, trust-weighted vote, confidence loop, and board report.
 - Clerk authentication is mandatory in the app. The embedded gateway verifies RS256 session tokens locally against the Clerk JWKS, keeps a minimal local account projection, and owner-scopes records. The account record stores only the Clerk subject, first/last seen timestamps, app version, and platform — no email, name, or content.
 - Real `sofuu.ai` and `sofuu.agent` modes are wired behind the same adapter but have not yet been validated against a provider or local model.
-- The app polls the gateway's organization and investigation routes to refresh the UI. It does not need Server-Sent Events or a listening HTTP server.
-- The Android app is gated behind Clerk's native sign-in/sign-up UI; there is no anonymous route. The signed-in identity and sign-out live on the Instance screen.
-- The Android alpha contains no mock/design package and no placeholder-only screens. Screens use real on-device data with loading, error, and empty states.
+- Live organization screens poll the in-process gateway and stop polling when backgrounded or when no live screen is visible. There is no Server-Sent Events connection or listening HTTP server.
+- The Android app is gated behind custom Clerk sign-in/sign-up screens; there is no anonymous route. The signed-in identity and sign-out live on the Instance screen.
+- External communications and evolution history have real read paths in the gateway, but this alpha has no producer that writes those records; the screens show explicit empty states until one exists. The previous synthetic org-chart diff was removed.
+- The Android alpha contains no mock/design package. Screens use real on-device data with loading, error, retry, and empty states.
 - The Instance screen reports the loaded Sofuu ABI, capability bits, a SHA-256 vector, and the local embedding dimension, so the SDK integration can be checked without a backend.
 
 ## Quick start
@@ -43,15 +44,22 @@ Veliora's application logic is the JavaScript gateway in `backend/sofuu/`. On An
 
 ### Android
 
-The Android app uses the official Clerk Android SDK (`com.clerk:clerk-android-ui`)
-and embeds `com.sofuu:sofuu-android:0.2.0` from the public GitHub Pages Maven
-repo. In the Clerk Dashboard:
+The Android app uses the official Clerk Android SDK (`com.clerk:clerk-android-api`)
+with a custom white sign-in/sign-up flow, and embeds
+`com.sofuu:sofuu-android:0.2.0` from the public GitHub Pages Maven repo. In the
+Clerk Dashboard:
 
 1. Copy the application's **Publishable Key** (`pk_test_...` or `pk_live_...`).
 2. Open **Native applications** and enable the **Native API**.
-3. Configure the sign-in methods you want (email/password, email code, Google, etc.).
-4. If your Clerk tokens include an `azp` claim, put the expected values in
+3. Enable **Email** and **Google** as sign-in methods.
+4. For email verification, enable **Email verification code** (the custom flow
+   does not use magic links).
+5. If your Clerk tokens include an `azp` claim, put the expected values in
    `VELIORA_CLERK_AUTHORIZED_PARTIES` (comma-separated).
+
+The Google button uses Clerk's browser OAuth redirect. The redirect URI is
+registered by the Clerk Android SDK itself (`clerk://com.veliora.callback`), so
+no extra manifest entry is required.
 
 Build with the key:
 
@@ -184,12 +192,24 @@ environment variables:
 | `VELIORA_EMBEDDED_MODE` | `scripted` | `scripted`, `sofuu`, or `agent` |
 | `VELIORA_STEP_DELAY_MS` | `25` | Scripted pipeline pacing |
 | `VELIORA_PROVIDER` / `VELIORA_MODEL` | empty | Optional real inference |
+| `VELIORA_BASE_URL` | empty | Optional OpenAI-compatible or local model endpoint |
 
 The host-side reference service (`make run`) still reads
 `backend/sofuu/veliora.json` and the `CLERK_*` / `VELIORA_*` environment
 variables in `.env.example`. The Android app stores QTSQ data under its
 private `filesDir/sofuu/veliora-store`; local inference is offline after the
 model file is provisioned.
+
+For on-device provider inference, provision the key into the app's private
+storage rather than the APK:
+
+```text
+files/sofuu/provider-keys.json
+{"openai":"sk-..."}   # or the provider name configured for Sofuu
+```
+
+`sofuu`/`agent` modes no longer fall back to scripted fixtures: a missing
+provider, model, key, or reachable endpoint is surfaced as an error.
 
 ## License
 

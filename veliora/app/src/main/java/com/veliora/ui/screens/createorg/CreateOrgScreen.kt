@@ -17,10 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,8 +62,9 @@ fun CreateOrgScreen(onLaunch: (String) -> Unit) {
     var selectedTemplateIndex by remember { mutableStateOf(-1) }
     var orgName by remember { mutableStateOf("") }
     var orgMission by remember { mutableStateOf("") }
+    var reloadKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(reloadKey) {
         loading = true
         error = null
         try {
@@ -98,6 +101,37 @@ fun CreateOrgScreen(onLaunch: (String) -> Unit) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = Slate500,
                     )
+                }
+                if (loading) {
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                } else if (error != null) {
+                    item {
+                        Column {
+                            Text(
+                                text = error!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TextButton(onClick = { reloadKey += 1 }) {
+                                Text("Retry")
+                            }
+                        }
+                    }
+                } else if (templates.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No organization templates are available.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Slate500,
+                        )
+                    }
                 }
                 itemsIndexed(templates) { index, template ->
                     val isSelected = index == selectedTemplateIndex
@@ -188,11 +222,21 @@ fun CreateOrgScreen(onLaunch: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(Spacing.xl))
 
+                error?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                }
+
                 GradientButton(
                     text = if (creating) "Creating…" else "Launch Organization",
                     onClick = {
                         if (!creating) {
                             creating = true
+                            error = null
                             scope.launch {
                                 try {
                                     val template = templates.getOrNull(selectedTemplateIndex)?.id ?: "startup"

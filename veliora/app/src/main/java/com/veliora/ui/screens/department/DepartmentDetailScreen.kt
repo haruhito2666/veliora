@@ -36,12 +36,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.veliora.app
 import com.veliora.data.Department
 import com.veliora.data.OrgTask
 import com.veliora.data.Worker
 import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.EmptyState
+import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.LivePulse
 import com.veliora.ui.components.ProgressBar
 import com.veliora.ui.components.ScrollableHeader
@@ -65,29 +67,35 @@ fun DepartmentDetailScreen(
 ) {
     val context = LocalContext.current
     val app = remember { context.app }
+    val store = app.orgStore
+    val liveOrg by store.organization.collectAsStateWithLifecycle()
 
     var department by remember { mutableStateOf<Department?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    LiveOrgEffect(orgId, store)
 
     LaunchedEffect(orgId, deptId) {
         loading = true
         error = null
         runCatching { app.repository.organization(orgId) }
             .onSuccess { snap ->
-                department = snap.departments.map { Mapper.toDepartment(it) }.find { it.id == deptId }
+                department = Mapper.toOrganization(snap, snap.dna)
+                    .departments
+                    .find { it.id == deptId }
             }
             .onFailure { e -> error = e.message ?: "Failed to load organization" }
         loading = false
     }
 
-    val data = department
+    val data = liveOrg?.departments?.find { it.id == deptId } ?: department
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { innerPadding ->
         when {
-            loading -> {
+            loading && data == null -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

@@ -89,6 +89,7 @@ data class Investigation(
     val etaMinutes: Int,
     val departmentStatuses: List<DepartmentStatus>,
     val confidence: Int? = null,
+    val isTerminal: Boolean = false,
 )
 
 enum class InvestigationPhase(val label: String, val glyph: String) {
@@ -96,7 +97,8 @@ enum class InvestigationPhase(val label: String, val glyph: String) {
     DEBATE("Debate", "◑"),
     VOTING("Voting", "●"),
     REPORT("Report", "◉"),
-    PAUSED("Paused", "⏸"),
+    CANCELLED("Cancelled", "✕"),
+    FAILED("Failed", "⚠"),
 }
 
 enum class InvestigationDepth(val label: String) {
@@ -134,47 +136,6 @@ enum class ChallengeStatus(val glyph: String, val label: String) {
     SURVIVED("✓", "survived"),
 }
 
-// ── Meeting ───────────────────────────────────────────────────────────
-
-data class Meeting(
-    val id: String,
-    val title: String,
-    val isLive: Boolean,
-    val participants: List<Participant>,
-    val elapsedMinutes: Int = 0,
-    val phase: String = "Debate",
-    val transcript: List<Utterance> = emptyList(),
-    val proposal: String? = null,
-    val vote: VoteTally? = null,
-    val scheduledTime: String? = null,
-)
-
-data class Participant(
-    val name: String,
-    val department: String,
-    val isPresent: Boolean,
-    val isModerator: Boolean = false,
-)
-
-data class Utterance(
-    val id: String,
-    val speaker: String,
-    val department: String,
-    val text: String,
-    val timestamp: String,
-    val isSpeaking: Boolean = false,
-    val isTyping: Boolean = false,
-)
-
-data class VoteTally(
-    val forCount: Int,
-    val againstCount: Int,
-    val abstainCount: Int,
-    val total: Int,
-    val threshold: Float,
-    val thresholdMet: Boolean,
-)
-
 // ── Report ────────────────────────────────────────────────────────────
 
 data class Report(
@@ -183,7 +144,7 @@ data class Report(
     val recommendation: String,
     val confidence: Int,
     val dissentingOpinions: List<DissentingOpinion>,
-    val supportingEvidence: List<Evidence>,
+    val supportingEvidence: List<String>,
     val risks: List<Risk>,
     val opportunities: List<String>,
     val nextSteps: List<NextStep>,
@@ -235,6 +196,7 @@ data class EvolutionEvent(
     val description: String,
     val reason: String,
     val daysAgo: Int?,
+    val status: String = "",
 )
 
 enum class EvolutionType(val glyph: String, val label: String) {
@@ -252,6 +214,7 @@ data class Constitution(
     val mission: String,
     val principles: List<String>,
     val coreValues: List<String>,
+    val ethics: List<String>,
     val decisionRules: List<String>,
     val amendments: List<Amendment>,
 )

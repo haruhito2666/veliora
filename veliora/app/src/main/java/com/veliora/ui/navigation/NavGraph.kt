@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,7 +35,7 @@ import com.veliora.ui.screens.constitution.ConstitutionScreen
 import com.veliora.ui.screens.createorg.CreateOrgScreen
 import com.veliora.ui.screens.department.DepartmentDetailScreen
 import com.veliora.ui.screens.evolution.EvolutionScreen
-import com.veliora.ui.screens.evolution.OrgChartDiffScreen
+import com.veliora.ui.screens.evolution.EvolutionEventScreen
 import com.veliora.ui.screens.home.HomeScreen
 import com.veliora.ui.screens.investigation.InvestigationScreen
 import com.veliora.ui.screens.investigations.InvestigationsScreen
@@ -60,7 +60,7 @@ object Routes {
     const val CONSTITUTION = "constitution/{orgId}"
     const val INSTANCE = "instance"
     const val CREATE_ORG = "create-org"
-    const val ORG_CHART_DIFF = "org-chart-diff/{orgId}/{eventId}"
+    const val EVOLUTION_EVENT = "evolution-event/{orgId}/{eventId}"
 
     fun home(orgId: String) = "home/$orgId"
     fun investigations(orgId: String) = "investigations/$orgId"
@@ -71,7 +71,7 @@ object Routes {
     fun comms(orgId: String) = "comms/$orgId"
     fun evolution(orgId: String) = "evolution/$orgId"
     fun constitution(orgId: String) = "constitution/$orgId"
-    fun orgChartDiff(orgId: String, eventId: String) = "org-chart-diff/$orgId/$eventId"
+    fun evolutionEvent(orgId: String, eventId: String) = "evolution-event/$orgId/$eventId"
 }
 
 // ── Bottom Nav Items ─────────────────────────────────────────────────
@@ -79,7 +79,7 @@ object Routes {
 private val mainNavItems = listOf(
     FloatingNavItem("Home", Icons.Filled.Home, Routes.HOME),
     FloatingNavItem("Investigations", Icons.Filled.Insights, Routes.INVESTIGATIONS),
-    FloatingNavItem("Comms", Icons.Filled.Send, Routes.COMMS),
+    FloatingNavItem("Comms", Icons.AutoMirrored.Filled.Send, Routes.COMMS),
 )
 
 // ── Nav Host ──────────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ fun VelioraNavHost(
             EvolutionScreen(
                 orgId = orgId,
                 onEventClick = { eventId ->
-                    navController.navigate(Routes.orgChartDiff(orgId, eventId))
+                    navController.navigate(Routes.evolutionEvent(orgId, eventId))
                 },
             )
         }
@@ -313,7 +313,7 @@ fun VelioraNavHost(
 
         // Org chart diff (evolution sub-view)
         composable(
-            route = Routes.ORG_CHART_DIFF,
+            route = Routes.EVOLUTION_EVENT,
             arguments = listOf(
                 navArgument("orgId") { type = NavType.StringType },
                 navArgument("eventId") { type = NavType.StringType },
@@ -321,7 +321,7 @@ fun VelioraNavHost(
         ) { backStackEntry ->
             val orgId = backStackEntry.arguments?.getString("orgId") ?: "org1"
             val eventId = backStackEntry.arguments?.getString("eventId") ?: ""
-            OrgChartDiffScreen(
+            EvolutionEventScreen(
                 orgId = orgId,
                 eventId = eventId,
             )

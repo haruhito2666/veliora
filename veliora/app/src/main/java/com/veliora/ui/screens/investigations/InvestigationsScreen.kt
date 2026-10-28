@@ -12,8 +12,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,14 +24,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.veliora.app
-import com.veliora.data.Investigation
 import com.veliora.data.InvestigationDepth
-import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.EmptyState
 import com.veliora.ui.components.GoalComposerSheet
 import com.veliora.ui.components.GradientButton
 import com.veliora.ui.components.InvestigationCard
+import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.ScrollableHeader
 import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.theme.Spacing
@@ -51,20 +53,15 @@ fun InvestigationsScreen(
     val context = LocalContext.current
     val app = remember { context.app }
     val scope = rememberCoroutineScope()
+    val store = app.orgStore
+    val investigations by store.investigations.collectAsStateWithLifecycle()
+    val loading by store.loading.collectAsStateWithLifecycle()
+    val error by store.error.collectAsStateWithLifecycle()
+    val actionError by store.actionError.collectAsStateWithLifecycle()
 
     var showComposer by remember { mutableStateOf(false) }
-    var investigations by remember { mutableStateOf<List<Investigation>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(orgId) {
-        loading = true
-        error = null
-        runCatching { app.repository.investigations(orgId) }
-            .onSuccess { dtos -> investigations = dtos.map { Mapper.toInvestigation(it) } }
-            .onFailure { e -> error = e.message ?: "Failed to load investigations" }
-        loading = false
-    }
+    LiveOrgEffect(orgId, store)
 
     Column(
         modifier = Modifier
@@ -87,6 +84,26 @@ fun InvestigationsScreen(
             item {
                 SectionHeader(title = "Active", count = investigations.size)
             }
+            val visibleError = error ?: actionError
+            if (visibleError != null && investigations.isNotEmpty()) {
+                item {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Text(
+                            text = visibleError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(
+                            onClick = {
+                                store.clearActionError()
+                                store.retry()
+                            },
+                        ) {
+                            Text("Retry")
+                        }
+                    }
+                }
+            }
             when {
                 loading -> {
                     item {
@@ -103,7 +120,7 @@ fun InvestigationsScreen(
                         EmptyState(
                             icon = "▣",
                             title = "No investigations yet",
-                            subtitle = error ?: "Give the organization its first goal.",
+                            subtitle = visibleError ?: "Give the organization its first goal.",
                         )
                     }
                 }

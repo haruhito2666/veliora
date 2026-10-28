@@ -11,14 +11,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -30,7 +31,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,14 +39,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.veliora.app
 import com.veliora.data.Report
 import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.BrandGradientSoft
 import com.veliora.ui.components.ConfidenceBar
-import com.veliora.ui.components.EvidenceRow
 import com.veliora.ui.components.EmptyState
 import com.veliora.ui.components.GoalComposerSheet
+import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.RiskBadge
 import com.veliora.ui.components.ScrollableHeader
 import com.veliora.ui.components.SectionHeader
@@ -61,7 +62,8 @@ import com.veliora.ui.theme.Slate500
 import com.veliora.ui.theme.Slate700
 import com.veliora.ui.theme.Slate900
 import com.veliora.ui.theme.Spacing
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 // ═══════════════════════════════════════════════════════════════════════
 // ReportScreen — the board report, the output of an investigation.
@@ -76,28 +78,45 @@ fun ReportScreen(
 ) {
     val context = LocalContext.current
     val app = remember { context.app }
+    val store = app.orgStore
+    val actionError by store.actionError.collectAsStateWithLifecycle()
     val deptColors = LocalDeptColors.current
     var report by remember { mutableStateOf<Report?>(null) }
     var goal by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableStateOf(0) }
 
     var showComposer by remember { mutableStateOf(false) }
-    var composerPrefill by remember { mutableStateOf("") }
+    var showDiscussion by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(investigationId) {
+    LiveOrgEffect(orgId, store)
+
+    LaunchedEffect(orgId, investigationId, reloadKey) {
         loading = true
-        error = null
-        try {
-            goal = app.repository.investigation(orgId, investigationId).prompt
-            report = Mapper.toReport(app.repository.report(orgId, investigationId))
-        } catch (e: Exception) {
-            error = e.message ?: "Failed to load report"
-        } finally {
-            loading = false
+        while (isActive) {
+            try {
+                val dto = app.repository.investigation(orgId, investigationId)
+                goal = dto.prompt
+                report = Mapper.toReport(app.repository.report(orgId, investigationId))
+                error = null
+                break
+            } catch (e: Exception) {
+                error = e.message ?: "Failed to load report"
+                loading = false
+                val current = runCatching {
+                    app.repository.investigation(orgId, investigationId)
+                }.getOrNull()
+                if (current != null && Mapper.toInvestigation(current).isTerminal) break
+            }
+            delay(1_000)
         }
+        loading = false
+    }
+
+    LaunchedEffect(actionError) {
+        actionError?.let { snackbarHostState.showSnackbar(it) }
     }
 
     Scaffold(
@@ -110,8 +129,21 @@ fun ReportScreen(
             loading -> Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
-            error != null -> Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            error != null -> Column(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
                 EmptyState(icon = "⚠", title = "Report unavailable", subtitle = error!!)
+                TextButton(
+                    onClick = {
+                        store.clearActionError()
+                        store.retry()
+                        reloadKey += 1
+                    },
+                ) {
+                    Text("Retry")
+                }
             }
             rep == null -> Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 EmptyState(icon = "◌", title = "No report yet", subtitle = "The report appears once the investigation completes.")
@@ -220,9 +252,34 @@ fun ReportScreen(
                                 horizontal = Spacing.mdLg,
                                 vertical = Spacing.sm,
                             ),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
                         ) {
-                            rep.supportingEvidence.forEach { evidence ->
-                                EvidenceRow(evidence = evidence)
+                            if (rep.supportingEvidence.isEmpty()) {
+                                Text(
+                                    text = "No supporting evidence was recorded.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Slate500,
+                                    modifier = Modifier.padding(vertical = Spacing.sm),
+                                )
+                            } else {
+                                rep.supportingEvidence.forEach { summary ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
+                                        Text(
+                                            text = "•",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Green500,
+                                        )
+                                        Text(
+                                            text = summary,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Slate700,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -244,7 +301,19 @@ fun ReportScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                                 ) {
-                                    RiskBadge(level = risk.level)
+                                    // The report contract currently carries risk
+                                    // descriptions without a severity. Do not
+                                    // invent one; show the neutral label only.
+                                    if (risk.level != null) {
+                                        RiskBadge(level = risk.level)
+                                    } else {
+                                        Text(
+                                            text = "RISK",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Slate500,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
                                     Text(
                                         text = risk.description,
                                         style = MaterialTheme.typography.bodyMedium,
@@ -338,11 +407,7 @@ fun ReportScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             TextButton(
-                                onClick = {
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar("Discussion transcript opens here")
-                                    }
-                                },
+                                onClick = { showDiscussion = true },
                             ) {
                                 Text(
                                     text = "Open",
@@ -360,9 +425,30 @@ fun ReportScreen(
         }
     }
 
+    if (showDiscussion) {
+        AlertDialog(
+            onDismissRequest = { showDiscussion = false },
+            title = { Text("Full Discussion") },
+            text = {
+                Text(
+                    text = report?.fullDiscussionSummary.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Slate700,
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showDiscussion = false }) {
+                    Text("Close")
+                }
+            },
+        )
+    }
+
     GoalComposerSheet(
         visible = showComposer,
-        initialGoal = composerPrefill,
         title = "Follow-up Investigation",
         onDismiss = { showComposer = false },
         onCreate = { goal, _ ->

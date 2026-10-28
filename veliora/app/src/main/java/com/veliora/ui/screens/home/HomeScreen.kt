@@ -29,9 +29,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.veliora.app
 import com.veliora.data.CaspianThread
 import com.veliora.data.Organization
@@ -51,8 +52,6 @@ import com.veliora.data.api.OrgLite
 import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.BrandGradientSoft
 import com.veliora.ui.components.CaspianThreadRow
-import com.veliora.ui.components.ConnectivityBanner
-import com.veliora.ui.components.ConnectionState
 import com.veliora.ui.components.DepartmentCard
 import com.veliora.ui.components.DnaChips
 import com.veliora.ui.components.EmptyState
@@ -60,6 +59,7 @@ import com.veliora.ui.components.GoalComposerSheet
 import com.veliora.ui.components.GradientButton
 import com.veliora.ui.components.HealthRing
 import com.veliora.ui.components.InvestigationCard
+import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.LivePulse
 import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.components.TextLink
@@ -96,15 +96,18 @@ fun HomeScreen(
     val app = remember { context.app }
     val store = app.orgStore
     val scope = rememberCoroutineScope()
-    val org by store.organization.collectAsState()
-    val investigations by store.investigations.collectAsState()
+    val org by store.organization.collectAsStateWithLifecycle()
+    val investigations by store.investigations.collectAsStateWithLifecycle()
+    val loadError by store.error.collectAsStateWithLifecycle()
+    val actionError by store.actionError.collectAsStateWithLifecycle()
     var caspianThreads by remember { mutableStateOf<List<CaspianThread>>(emptyList()) }
     var switchOrgs by remember { mutableStateOf<List<OrgLite>>(emptyList()) }
     var showComposer by remember { mutableStateOf(false) }
     var showOrgSwitcher by remember { mutableStateOf(false) }
 
+    LiveOrgEffect(orgId, store)
+
     LaunchedEffect(orgId) {
-        store.loadOrg(orgId)
         try {
             caspianThreads = app.repository.communications(orgId).map { Mapper.toCaspianThread(it) }
             switchOrgs = app.repository.organizations().data
@@ -114,8 +117,26 @@ fun HomeScreen(
 
     val loadedOrg = org
     if (loadedOrg == null) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        if (loadError != null) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(Spacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                EmptyState(
+                    icon = "⚠",
+                    title = "Could not load organization",
+                    subtitle = loadError,
+                )
+                GradientButton(
+                    text = "Retry",
+                    onClick = { store.retry() },
+                )
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            }
         }
         return
     }
@@ -136,12 +157,30 @@ fun HomeScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            item {
-                ConnectivityBanner(
-                    state = ConnectionState.LIVE,
-                    lastKnownTime = "Live",
-                    modifier = Modifier.statusBarsPadding(),
-                )
+            val visibleError = loadError ?: actionError
+            if (visibleError != null) {
+                item {
+                    VelioraCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.mdLg),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        ) {
+                            Text(
+                                text = visibleError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TextButton(
+                                onClick = {
+                                    store.clearActionError()
+                                    store.retry()
+                                },
+                            ) {
+                                Text("Retry")
+                            }
+                        }
+                    }
+                }
             }
             item {
                 HomeHeader(
@@ -151,7 +190,11 @@ fun HomeScreen(
             }
 
             item {
-                OrgHeader(org = loadedOrg, onConstitutionClick = onConstitutionClick)
+                OrgHeader(
+                    org = loadedOrg,
+                    onEvolutionClick = onEvolutionClick,
+                    onConstitutionClick = onConstitutionClick,
+                )
             }
 
             item {
@@ -359,6 +402,7 @@ private fun HomeHeader(
 @Composable
 private fun OrgHeader(
     org: Organization,
+    onEvolutionClick: () -> Unit,
     onConstitutionClick: () -> Unit,
 ) {
     Column(
@@ -431,6 +475,11 @@ private fun OrgHeader(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(modifier = Modifier.weight(1f))
+                    TextLink(
+                        text = "Evolution",
+                        onClick = onEvolutionClick,
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.md))
                     TextLink(
                         text = "View Constitution",
                         onClick = onConstitutionClick,

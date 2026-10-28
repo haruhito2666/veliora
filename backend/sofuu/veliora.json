@@ -9,7 +9,6 @@
   "maxResearchCycles": 3,
   "stepDelayMs": 25,
   "fallbackToScripted": true,
-  "webSearch": false,
   "authMode": "clerk",
   "appOrigins": [
     "https://veliora-app.rikuhana.com",

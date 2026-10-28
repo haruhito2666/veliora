@@ -27,7 +27,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import com.veliora.app
 import com.veliora.data.EvolutionEvent
-import com.veliora.data.EvolutionType
 import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.EmptyState
 import com.veliora.ui.components.EvolutionEventRow
@@ -47,8 +46,9 @@ fun EvolutionScreen(
     var events by remember { mutableStateOf<List<EvolutionEvent>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(orgId) {
+    LaunchedEffect(orgId, reloadKey) {
         loading = true
         error = null
         runCatching { app.repository.evolutionEvents(orgId) }
@@ -81,6 +81,11 @@ fun EvolutionScreen(
                 ScrollableHeader(
                     title = "Evolution History",
                     subtitle = "last 30d",
+                    actions = {
+                        TextButton(onClick = { reloadKey += 1 }) {
+                            Text("Refresh")
+                        }
+                    },
                 )
             }
 
@@ -119,13 +124,11 @@ fun EvolutionScreen(
                             verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                         ) {
                             EvolutionEventRow(event = event)
-                            if (event.type == EvolutionType.SPLIT || event.type == EvolutionType.MERGE) {
-                                TextButton(
-                                    onClick = { onEventClick(event.id) },
-                                    modifier = Modifier.align(Alignment.End),
-                                ) {
-                                    Text("View Diff", color = Indigo600)
-                                }
+                            TextButton(
+                                onClick = { onEventClick(event.id) },
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text("View Details", color = Indigo600)
                             }
                         }
                     }

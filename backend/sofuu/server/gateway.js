@@ -322,25 +322,89 @@ export function createGateway({ store, bus, orchestrator, config, auth }) {
   add("GET", "/v1/organizations/:orgID/status", ({ res, params, user }) => {
     const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-    const investigations = store.list("investigations", { ref: params.orgID });
+    const terminal = new Set(["completed", "cancelled", "failed", "archived"]);
+    const investigations = store
+      .list("investigations", { ref: params.orgID })
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     const meetings = store.list("meetings", { ref: params.orgID });
-    const activeInvestigations = investigations.filter(
-      (inv) => !["completed", "cancelled", "failed", "archived"].includes(inv.state),
+    const activeInvestigations = investigations.filter((inv) => !terminal.has(inv.state));
+    const active = activeInvestigations[0] || null;
+    const tasks = active ? orchestrator.tasks(active.investigation_id) : [];
+    const evidence = active ? orchestrator.evidence(active.investigation_id) : [];
+    const challenges = active ? orchestrator.challenges(active.investigation_id) : [];
+    const currentTasks = tasks.filter(
+      (task) => task.cycle === active?.cycle_count && task.task_type === "collect_evidence",
     );
+
+    const departments = org.departments.map((department) => {
+      const workers = org.workers.filter(
+        (worker) => worker.department_id === department.department_id,
+      );
+      const trust = workers.length
+        ? workers.reduce((sum, worker) => sum + Number(worker.trust_score || 0), 0) / workers.length
+        : 0.5;
+      const task = currentTasks.find((item) => item.department === department.name) || null;
+      const departmentEvidence = evidence.filter((item) => item.department === department.name);
+      const departmentChallenges = challenges.filter(
+        (item) => item.department === department.name && item.status === "open",
+      );
+
+      let workerState = "idle";
+      let activity = "Idle";
+      let currentTask = "";
+
+      if (active) {
+        currentTask = task?.task_id || "";
+        if (task?.status === "in_progress") {
+          workerState = "working";
+          activity = task.description;
+        } else if (task?.status === "pending") {
+          workerState = "queued";
+          activity = `Queued: ${task.description}`;
+        } else if (task?.status === "done") {
+          activity = "Research complete";
+        } else if (active.state === "planning") {
+          workerState = "waiting";
+          activity = "Preparing investigation";
+        } else if (active.state === "analyzing") {
+          workerState = departmentEvidence.length ? "coordinating" : "waiting";
+          activity = departmentEvidence.length ? "Reviewing evidence" : "Awaiting analysis";
+        } else if (active.state === "debating") {
+          workerState = "coordinating";
+          activity = departmentEvidence.length ? "Debating evidence" : "Observing debate";
+        } else if (["synthesizing", "vote", "voting", "confidence_chk"].includes(active.state)) {
+          workerState = department.name === "CEO Office" ? "coordinating" : "waiting";
+          activity = department.name === "CEO Office"
+            ? "Synthesizing board recommendation"
+            : "Awaiting vote";
+        } else if (active.state === "reporting") {
+          workerState = department.name === "CEO Office" ? "implementing" : "waiting";
+          activity = department.name === "CEO Office"
+            ? "Writing board report"
+            : "Awaiting report";
+        } else if (active.state === "researching") {
+          workerState = "waiting";
+          activity = "Preparing research";
+        }
+      }
+
+      return {
+        name: department.name,
+        worker_state: workerState,
+        activity,
+        current_task: currentTask,
+        artifacts: departmentEvidence.length,
+        open_challenges: departmentChallenges.length,
+        caspian_open: 0,
+        trust,
+      };
+    });
+
     sendJSON(res, 200, {
       organization_id: org.organization_id,
       state: org.state,
       health: org.health,
-      departments: org.departments.map((department) => ({
-        name: department.name,
-        worker_state: "idle",
-        activity: "",
-        current_task: "",
-        artifacts: 0,
-        open_challenges: 0,
-        caspian_open: 0,
-        trust: 0.5,
-      })),
+      departments,
       counts: {
         investigations_active: activeInvestigations.length,
         meetings: meetings.filter((meeting) => meeting.state !== "ended" && meeting.state !== "cancelled").length,
@@ -364,13 +428,15 @@ export function createGateway({ store, bus, orchestrator, config, auth }) {
   add("GET", "/v1/organizations/:orgID/communications", ({ res, params, user }) => {
     const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-    sendJSON(res, 200, []);
+    // Records are written by future communication adapters; keep the read
+    // path real so a producer only has to persist the document.
+    sendJSON(res, 200, store.list("communications", { ref: params.orgID }));
   });
 
   add("GET", "/v1/organizations/:orgID/evolution/events", ({ res, params, user }) => {
     const org = ownedOrg(user, params.orgID);
     if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-    sendJSON(res, 200, []);
+    sendJSON(res, 200, store.list("evolution", { ref: params.orgID }));
   });
 
   // ── investigations ───────────────────────────────────────────────────

@@ -23,7 +23,7 @@ async function main() {
   const bus = new EventBus(store);
 
   if (config.mode === "agent") {
-    defineAgents();
+    defineAgents(config);
   }
 
   const llm = new LLM(config);

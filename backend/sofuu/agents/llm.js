@@ -48,11 +48,13 @@ export class LLM {
       if (!this.config.provider || !this.config.model) {
         throw new Error("provider and model are required for non-scripted mode");
       }
-      const response = await sofuu.ai.complete(prompt, {
+      const options = {
         provider: this.config.provider,
         model: this.config.model,
         temperature: 0.2,
-      });
+      };
+      if (this.config.baseUrl) options.base_url = this.config.baseUrl;
+      const response = await sofuu.ai.complete(prompt, options);
       return extractJSON(response && response.text !== undefined ? response.text : response);
     } catch (error) {
       if (!this.config.fallbackToScripted) throw error;

@@ -5,11 +5,11 @@ const DEFAULTS = {
   mode: "scripted",
   provider: "",
   model: "",
+  baseUrl: "",
   confidenceThreshold: 0.72,
   maxResearchCycles: 3,
   stepDelayMs: 25,
   fallbackToScripted: true,
-  webSearch: false,
   // Authentication is fail-closed: Clerk is the default. `dev` is an
   // explicit local-test mode and still requires a bearer token.
   authMode: "clerk",
@@ -71,6 +71,7 @@ export async function loadConfig() {
   const env = (typeof process !== "undefined" && process.env) || {};
   const config = { ...DEFAULTS, ...file };
   config.clerk = { ...DEFAULTS.clerk, ...(file.clerk || {}) };
+  config.baseUrl = String(file.baseUrl || file.base_url || config.baseUrl || "");
   config.appOrigins = list(file.appOrigins || config.appOrigins, DEFAULTS.appOrigins);
   config.clerk.authorizedParties = list(
     config.clerk.authorizedParties,
@@ -83,6 +84,7 @@ export async function loadConfig() {
   if (env.VELIORA_MODE) config.mode = env.VELIORA_MODE;
   if (env.VELIORA_PROVIDER) config.provider = env.VELIORA_PROVIDER;
   if (env.VELIORA_MODEL) config.model = env.VELIORA_MODEL;
+  if (env.VELIORA_BASE_URL) config.baseUrl = env.VELIORA_BASE_URL;
   if (env.SOFUU_PROVIDER && !config.provider) config.provider = env.SOFUU_PROVIDER;
   if (env.SOFUU_MODEL && !config.model) config.model = env.SOFUU_MODEL;
   if (env.VELIORA_CONFIDENCE_THRESHOLD) {
@@ -96,9 +98,6 @@ export async function loadConfig() {
   }
   if (env.VELIORA_FALLBACK_SCRIPTED) {
     config.fallbackToScripted = bool(env.VELIORA_FALLBACK_SCRIPTED, config.fallbackToScripted);
-  }
-  if (env.VELIORA_WEB_SEARCH) {
-    config.webSearch = bool(env.VELIORA_WEB_SEARCH, config.webSearch);
   }
 
   if (env.VELIORA_AUTH_MODE) config.authMode = String(env.VELIORA_AUTH_MODE).toLowerCase();

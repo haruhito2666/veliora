@@ -19,12 +19,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,6 +95,14 @@ fun OrgSelectorScreen(
                 ScrollableHeader(
                     title = "Organizations",
                     actions = {
+                        IconButton(onClick = { reloadKey += 1 }) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "Refresh organizations",
+                                tint = Slate700,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                         IconButton(onClick = onInstanceClick) {
                             Icon(
                                 imageVector = Icons.Filled.Info,
@@ -114,7 +124,17 @@ fun OrgSelectorScreen(
                     }
                 }
                 error != null -> item {
-                    EmptyState(icon = "⚠", title = "Could not load", subtitle = error!!)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        EmptyState(icon = "⚠", title = "Could not load", subtitle = error!!)
+                        TextButton(
+                            onClick = {
+                                app.repository.retrySofuu()
+                                reloadKey += 1
+                            },
+                        ) {
+                            Text("Retry")
+                        }
+                    }
                 }
                 organizations.isEmpty() -> item {
                     EmptyState(
@@ -123,8 +143,8 @@ fun OrgSelectorScreen(
                         subtitle = "Create your first organization to begin.",
                     )
                 }
-                else -> itemsIndexed(organizations) { index, org ->
-                    val isCurrent = index == 0
+                else -> itemsIndexed(organizations) { _, org ->
+                    val isCurrent = org.organizationId == app.orgStore.activeOrgId
                     VelioraCard(
                         modifier = Modifier
                             .fillMaxWidth()

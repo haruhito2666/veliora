@@ -5,6 +5,8 @@ import com.veliora.data.CaspianChannel
 import com.veliora.data.ChallengeStatus
 import com.veliora.data.Constitution
 import com.veliora.data.Department
+import com.veliora.data.DepartmentStatus
+import com.veliora.data.DeptState
 import com.veliora.data.Evidence
 import com.veliora.data.EvolutionEvent
 import com.veliora.data.EvolutionType
@@ -14,7 +16,6 @@ import com.veliora.data.Organization
 import com.veliora.data.OrgDNA
 import com.veliora.data.Report
 import com.veliora.data.Worker
-import com.veliora.data.api.ChallengeDto
 import com.veliora.data.api.CommunicationThreadDto
 import com.veliora.data.api.ConstitutionDto
 import com.veliora.data.api.DepartmentDto
@@ -22,6 +23,7 @@ import com.veliora.data.api.EvidenceDto
 import com.veliora.data.api.EvolutionEventDto
 import com.veliora.data.api.InvestigationDto
 import com.veliora.data.api.OrgSnapshot
+import com.veliora.data.api.OrgStatus
 import com.veliora.data.api.ReportDto
 import com.veliora.data.api.WorkerDto
 
@@ -32,6 +34,7 @@ import com.veliora.data.api.WorkerDto
 object Mapper {
 
     fun toOrganization(snap: OrgSnapshot, dna: Map<String, Double>): Organization {
+        val workersByDepartment = snap.workers.groupBy { it.departmentId }
         return Organization(
             id = snap.organizationId,
             name = snap.name,
@@ -48,7 +51,11 @@ object Mapper {
                 longTermThinking = ((dna["long_term_thinking"] ?: 0.0) * 100).toInt(),
                 security = ((dna["security"] ?: 0.0) * 100).toInt(),
             ),
-            departments = snap.departments.map { toDepartment(it) },
+            departments = snap.departments.map { dto ->
+                toDepartment(dto).copy(
+                    workers = workersByDepartment[dto.departmentId].orEmpty().map(::toWorker),
+                )
+            },
             isAlive = snap.state == "active",
         )
     }
@@ -60,14 +67,14 @@ object Mapper {
             shortName = d.name.take(6),
             trust = (d.influence * 100).toInt(),
             workerCount = d.workers.size,
-            currentActivity = d.role,
+            currentActivity = "Idle",
         )
     }
 
     fun toWorker(w: WorkerDto): Worker {
         return Worker(
             id = w.workerId,
-            name = w.role,
+            name = w.name.ifBlank { w.role },
             role = w.role,
             department = w.departmentId,
             trust = (w.trustScore * 100).toInt(),
@@ -77,11 +84,14 @@ object Mapper {
     }
 
     fun toInvestigation(dto: InvestigationDto): Investigation {
+        val terminal = dto.state in TERMINAL_STATES
         val phase = when (dto.state) {
-            "researching" -> InvestigationPhase.GATHERING
+            "planning", "researching", "analyzing" -> InvestigationPhase.GATHERING
             "debating" -> InvestigationPhase.DEBATE
-            "vote" -> InvestigationPhase.VOTING
-            "completed", "archived" -> InvestigationPhase.REPORT
+            "synthesizing", "vote", "voting", "confidence_chk" -> InvestigationPhase.VOTING
+            "reporting", "completed", "archived" -> InvestigationPhase.REPORT
+            "cancelled" -> InvestigationPhase.CANCELLED
+            "failed" -> InvestigationPhase.FAILED
             else -> InvestigationPhase.GATHERING
         }
         return Investigation(
@@ -94,8 +104,26 @@ object Mapper {
             etaMinutes = 0,
             departmentStatuses = emptyList(),
             confidence = if (dto.confidence > 0) (dto.confidence * 100).toInt() else null,
+            isTerminal = terminal,
         )
     }
+
+    fun toDepartmentStatuses(status: OrgStatus): List<DepartmentStatus> =
+        status.departments.map { department ->
+            DepartmentStatus(
+                departmentName = department.name,
+                state = when (department.workerState) {
+                    "working", "in_progress" -> DeptState.WORKING
+                    "implementing" -> DeptState.IMPLEMENTING
+                    "queued", "pending" -> DeptState.QUEUED
+                    "coordinating" -> DeptState.COORDINATING
+                    else -> DeptState.WAITING
+                },
+                activity = department.activity.ifBlank {
+                    department.currentTask.ifBlank { "Idle" }
+                },
+            )
+        }
 
     fun toEvidence(e: EvidenceDto): Evidence {
         val status = when (e.status) {
@@ -123,9 +151,7 @@ object Mapper {
             dissentingOpinions = r.dissentingOpinions.map {
                 com.veliora.data.DissentingOpinion(department = "", argument = it)
             },
-            supportingEvidence = r.supportingEvidence.map {
-                Evidence(id = "", timestamp = "", department = "", type = "evidence", description = it)
-            },
+            supportingEvidence = r.supportingEvidence,
             risks = r.risks.map { com.veliora.data.Risk(level = null, description = it) },
             opportunities = r.opportunities,
             nextSteps = r.nextSteps.map { com.veliora.data.NextStep(description = it) },
@@ -173,6 +199,7 @@ object Mapper {
                     java.time.Duration.between(then, java.time.OffsetDateTime.now()).toDays().coerceAtLeast(0).toInt()
                 }.getOrNull()
             },
+            status = e.status,
         )
     }
 
@@ -182,30 +209,24 @@ object Mapper {
             mission = c.mission,
             principles = c.principles,
             coreValues = c.values,
+            ethics = c.ethics,
             decisionRules = decisionRules,
             amendments = emptyList(),
         )
     }
 
-    fun toChallenge(dto: ChallengeDto, evidenceId: String): Evidence {
-        return Evidence(
-            id = dto.challengeId,
-            timestamp = "",
-            department = dto.by,
-            type = "challenge",
-            description = dto.critique,
-            challengeStatus = ChallengeStatus.CHALLENGED,
-        )
-    }
+    private val TERMINAL_STATES = setOf("completed", "archived", "cancelled", "failed")
 
     private fun phaseProgress(state: String): Int = when (state) {
         "planning" -> 10
         "researching" -> 35
         "analyzing" -> 50
         "debating" -> 65
-        "synthesizing", "vote" -> 80
-        "reporting" -> 92
+        "synthesizing" -> 80
+        "vote", "voting", "confidence_chk" -> 85
+        "reporting" -> 95
         "completed", "archived" -> 100
+        "cancelled", "failed" -> 0
         else -> 5
     }
 

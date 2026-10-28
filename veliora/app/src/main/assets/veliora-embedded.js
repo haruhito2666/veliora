@@ -7,11 +7,11 @@
     mode: "scripted",
     provider: "",
     model: "",
+    baseUrl: "",
     confidenceThreshold: 0.72,
     maxResearchCycles: 3,
     stepDelayMs: 25,
     fallbackToScripted: true,
-    webSearch: false,
     // Authentication is fail-closed: Clerk is the default. `dev` is an
     // explicit local-test mode and still requires a bearer token.
     authMode: "clerk",
@@ -64,6 +64,7 @@
     const env = typeof process !== "undefined" && process.env || {};
     const config = { ...DEFAULTS, ...file };
     config.clerk = { ...DEFAULTS.clerk, ...file.clerk || {} };
+    config.baseUrl = String(file.baseUrl || file.base_url || config.baseUrl || "");
     config.appOrigins = list(file.appOrigins || config.appOrigins, DEFAULTS.appOrigins);
     config.clerk.authorizedParties = list(
       config.clerk.authorizedParties,
@@ -75,6 +76,7 @@
     if (env.VELIORA_MODE) config.mode = env.VELIORA_MODE;
     if (env.VELIORA_PROVIDER) config.provider = env.VELIORA_PROVIDER;
     if (env.VELIORA_MODEL) config.model = env.VELIORA_MODEL;
+    if (env.VELIORA_BASE_URL) config.baseUrl = env.VELIORA_BASE_URL;
     if (env.SOFUU_PROVIDER && !config.provider) config.provider = env.SOFUU_PROVIDER;
     if (env.SOFUU_MODEL && !config.model) config.model = env.SOFUU_MODEL;
     if (env.VELIORA_CONFIDENCE_THRESHOLD) {
@@ -88,9 +90,6 @@
     }
     if (env.VELIORA_FALLBACK_SCRIPTED) {
       config.fallbackToScripted = bool(env.VELIORA_FALLBACK_SCRIPTED, config.fallbackToScripted);
-    }
-    if (env.VELIORA_WEB_SEARCH) {
-      config.webSearch = bool(env.VELIORA_WEB_SEARCH, config.webSearch);
     }
     if (env.VELIORA_AUTH_MODE) config.authMode = String(env.VELIORA_AUTH_MODE).toLowerCase();
     if (env.VELIORA_APP_ORIGINS) config.appOrigins = list(env.VELIORA_APP_ORIGINS, config.appOrigins);
@@ -595,11 +594,13 @@
         if (!this.config.provider || !this.config.model) {
           throw new Error("provider and model are required for non-scripted mode");
         }
-        const response = await sofuu.ai.complete(prompt, {
+        const options = {
           provider: this.config.provider,
           model: this.config.model,
           temperature: 0.2
-        });
+        };
+        if (this.config.baseUrl) options.base_url = this.config.baseUrl;
+        const response = await sofuu.ai.complete(prompt, options);
         return extractJSON(response && response.text !== void 0 ? response.text : response);
       } catch (error) {
         if (!this.config.fallbackToScripted) throw error;
@@ -688,10 +689,10 @@
   };
 
   // backend/sofuu/agents/definitions.js
-  function defineAgents() {
+  function defineAgents(config = {}) {
     for (const department of STARTUP_TEMPLATE.departments) {
       try {
-        sofuu.agent.define({
+        const definition = {
           name: `veliora_${department.id}`,
           system: [
             `You are the ${department.role} in the ${department.name}.`,
@@ -701,7 +702,11 @@
           tools: ["web"],
           memory: "agent",
           budget: { maxSteps: 8, maxWallMs: 12e4 }
-        });
+        };
+        if (config.provider) definition.provider = config.provider;
+        if (config.model) definition.model = config.model;
+        if (config.baseUrl) definition.base_url = config.baseUrl;
+        sofuu.agent.define(definition);
       } catch (error) {
         console.warn(`could not define Sofuu agent veliora_${department.id}: ${error.message}`);
       }
@@ -1869,25 +1874,76 @@
     add("GET", "/v1/organizations/:orgID/status", ({ res, params, user }) => {
       const org = ownedOrg(user, params.orgID);
       if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-      const investigations = store.list("investigations", { ref: params.orgID });
+      const terminal2 = /* @__PURE__ */ new Set(["completed", "cancelled", "failed", "archived"]);
+      const investigations = store.list("investigations", { ref: params.orgID }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
       const meetings = store.list("meetings", { ref: params.orgID });
-      const activeInvestigations = investigations.filter(
-        (inv) => !["completed", "cancelled", "failed", "archived"].includes(inv.state)
+      const activeInvestigations = investigations.filter((inv) => !terminal2.has(inv.state));
+      const active = activeInvestigations[0] || null;
+      const tasks = active ? orchestrator.tasks(active.investigation_id) : [];
+      const evidence = active ? orchestrator.evidence(active.investigation_id) : [];
+      const challenges = active ? orchestrator.challenges(active.investigation_id) : [];
+      const currentTasks = tasks.filter(
+        (task) => task.cycle === active?.cycle_count && task.task_type === "collect_evidence"
       );
+      const departments = org.departments.map((department) => {
+        const workers = org.workers.filter(
+          (worker) => worker.department_id === department.department_id
+        );
+        const trust = workers.length ? workers.reduce((sum, worker) => sum + Number(worker.trust_score || 0), 0) / workers.length : 0.5;
+        const task = currentTasks.find((item) => item.department === department.name) || null;
+        const departmentEvidence = evidence.filter((item) => item.department === department.name);
+        const departmentChallenges = challenges.filter(
+          (item) => item.department === department.name && item.status === "open"
+        );
+        let workerState = "idle";
+        let activity = "Idle";
+        let currentTask = "";
+        if (active) {
+          currentTask = task?.task_id || "";
+          if (task?.status === "in_progress") {
+            workerState = "working";
+            activity = task.description;
+          } else if (task?.status === "pending") {
+            workerState = "queued";
+            activity = `Queued: ${task.description}`;
+          } else if (task?.status === "done") {
+            activity = "Research complete";
+          } else if (active.state === "planning") {
+            workerState = "waiting";
+            activity = "Preparing investigation";
+          } else if (active.state === "analyzing") {
+            workerState = departmentEvidence.length ? "coordinating" : "waiting";
+            activity = departmentEvidence.length ? "Reviewing evidence" : "Awaiting analysis";
+          } else if (active.state === "debating") {
+            workerState = "coordinating";
+            activity = departmentEvidence.length ? "Debating evidence" : "Observing debate";
+          } else if (["synthesizing", "vote", "voting", "confidence_chk"].includes(active.state)) {
+            workerState = department.name === "CEO Office" ? "coordinating" : "waiting";
+            activity = department.name === "CEO Office" ? "Synthesizing board recommendation" : "Awaiting vote";
+          } else if (active.state === "reporting") {
+            workerState = department.name === "CEO Office" ? "implementing" : "waiting";
+            activity = department.name === "CEO Office" ? "Writing board report" : "Awaiting report";
+          } else if (active.state === "researching") {
+            workerState = "waiting";
+            activity = "Preparing research";
+          }
+        }
+        return {
+          name: department.name,
+          worker_state: workerState,
+          activity,
+          current_task: currentTask,
+          artifacts: departmentEvidence.length,
+          open_challenges: departmentChallenges.length,
+          caspian_open: 0,
+          trust
+        };
+      });
       sendJSON(res, 200, {
         organization_id: org.organization_id,
         state: org.state,
         health: org.health,
-        departments: org.departments.map((department) => ({
-          name: department.name,
-          worker_state: "idle",
-          activity: "",
-          current_task: "",
-          artifacts: 0,
-          open_challenges: 0,
-          caspian_open: 0,
-          trust: 0.5
-        })),
+        departments,
         counts: {
           investigations_active: activeInvestigations.length,
           meetings: meetings.filter((meeting) => meeting.state !== "ended" && meeting.state !== "cancelled").length,
@@ -1908,12 +1964,12 @@
     add("GET", "/v1/organizations/:orgID/communications", ({ res, params, user }) => {
       const org = ownedOrg(user, params.orgID);
       if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-      sendJSON(res, 200, []);
+      sendJSON(res, 200, store.list("communications", { ref: params.orgID }));
     });
     add("GET", "/v1/organizations/:orgID/evolution/events", ({ res, params, user }) => {
       const org = ownedOrg(user, params.orgID);
       if (!org) return sendError(res, 404, "organization_not_found", "organization not found");
-      sendJSON(res, 200, []);
+      sendJSON(res, 200, store.list("evolution", { ref: params.orgID }));
     });
     add("GET", "/v1/organizations/:orgID/investigations", ({ res, params, user }) => {
       const org = ownedOrg(user, params.orgID);
@@ -2297,7 +2353,7 @@
     await auth.initialize();
     const store = new Store(config.storePath);
     const bus = new EventBus(store, { heartbeat: false });
-    if (config.mode === "agent") defineAgents();
+    if (config.mode === "agent") defineAgents(config);
     const llm = new LLM(config);
     const orchestrator = new InvestigationOrchestrator({ store, bus, llm, config });
     const gateway = createGateway({ store, bus, orchestrator, config, auth });

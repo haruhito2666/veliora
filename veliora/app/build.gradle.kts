@@ -83,6 +83,9 @@ android {
         val embeddedModel = (project.findProperty("VELIORA_MODEL") as String?)
             ?: System.getenv("VELIORA_MODEL")
             ?: ""
+        val embeddedBaseUrl = (project.findProperty("VELIORA_BASE_URL") as String?)
+            ?: System.getenv("VELIORA_BASE_URL")
+            ?: ""
 
         fun quoted(value: String): String =
             "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -94,6 +97,7 @@ android {
         buildConfigField("int", "EMBEDDED_STEP_DELAY_MS", embeddedStepDelay.toString())
         buildConfigField("String", "EMBEDDED_PROVIDER", quoted(embeddedProvider))
         buildConfigField("String", "EMBEDDED_MODEL", quoted(embeddedModel))
+        buildConfigField("String", "EMBEDDED_BASE_URL", quoted(embeddedBaseUrl))
 
         // Clerk publishable key: -PVELIORA_CLERK_PUBLISHABLE_KEY=pk_test_...
         // or the same variable in the environment. A publishable key is not a
@@ -156,11 +160,6 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation("com.sofuu:sofuu-android:0.2.0")
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.clerk.ui) {
-        // Clerk's theming helper asks for a JetBrains Compose material3 alpha,
-        // which drags in lifecycle 2.11/core 1.19 and requires compileSdk 37.
-        // The app supplies stable material3 1.4.0 from the Compose BOM.
-        exclude(group = "org.jetbrains.compose.material3", module = "material3")
-    }
+    implementation(libs.clerk.api)
     debugImplementation(libs.androidx.ui.tooling)
 }

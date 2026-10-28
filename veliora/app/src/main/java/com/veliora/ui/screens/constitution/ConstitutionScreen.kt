@@ -53,7 +53,6 @@ import com.veliora.data.Constitution
 import com.veliora.data.repo.Mapper
 import com.veliora.ui.components.EmptyState
 import com.veliora.ui.components.ScrollableHeader
-import com.veliora.ui.components.rememberHapticContext
 import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.components.StatusBadge
 import com.veliora.ui.components.VelioraCard
@@ -177,6 +176,18 @@ fun ConstitutionScreen(
                         }
                     }
 
+                    // ── Ethics ───────────────────────────────────────────────
+                    if (data.ethics.isNotEmpty()) {
+                        item {
+                            SectionHeader(title = "Ethics", count = data.ethics.size)
+                            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                                data.ethics.forEach { ethic ->
+                                    BulletRow(text = ethic)
+                                }
+                            }
+                        }
+                    }
+
                     // ── Decision Rules ──────────────────────────────────────
                     item {
                         SectionHeader(title = "Decision Rules", count = data.decisionRules.size)
@@ -190,13 +201,21 @@ fun ConstitutionScreen(
                     // ── Amendments ──────────────────────────────────────────
                     item {
                         SectionHeader(title = "Amendments", count = data.amendments.size)
-                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                            data.amendments.forEach { amendment ->
-                                AmendmentRow(
-                                    text = amendment.text,
-                                    daysAgo = amendment.daysAgo,
-                                    status = amendment.status,
-                                )
+                        if (data.amendments.isEmpty()) {
+                            EmptyState(
+                                icon = "◌",
+                                title = "No amendments yet",
+                                subtitle = "Ratified and debated amendments will appear here.",
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                                data.amendments.forEach { amendment ->
+                                    AmendmentRow(
+                                        text = amendment.text,
+                                        daysAgo = amendment.daysAgo,
+                                        status = amendment.status,
+                                    )
+                                }
                             }
                         }
                     }

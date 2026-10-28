@@ -12,6 +12,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,9 +51,16 @@ fun InstanceScreen(
     var sdkCaps by remember { mutableStateOf<JSONObject?>(null) }
     var sdkSelfTest by remember { mutableStateOf<JSONObject?>(null) }
     var sdkError by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(reloadKey) {
+        loading = true
         error = null
+        sdkError = null
+        organizations = emptyList()
+        sdkAbi = 0
+        sdkCaps = null
+        sdkSelfTest = null
         runCatching { app.repository.organizations().data }
             .onSuccess { organizations = it }
             .onFailure { error = it.message ?: "Failed to load this instance" }
@@ -74,7 +82,16 @@ fun InstanceScreen(
             contentPadding = PaddingValues(Spacing.lg, Spacing.xs, Spacing.lg, Spacing.xxl),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            item { ScrollableHeader(title = "Instance") }
+            item {
+                ScrollableHeader(
+                    title = "Instance",
+                    actions = {
+                        TextButton(onClick = { reloadKey += 1 }) {
+                            Text("Refresh")
+                        }
+                    },
+                )
+            }
             item {
                 VelioraCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(Spacing.mdLg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
