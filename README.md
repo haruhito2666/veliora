@@ -6,6 +6,13 @@ Veliora turns a goal into an investigation run by an organization of specialized
 
 > **Alpha:** The reference Android app uses Clerk for sign-in and has no anonymous mode. That is an integration choice for this app, not a requirement of the open-source project: no Clerk instance, key, secret, or maintainer domain is shipped or expected. Every build configures its own auth provider. The embedded gateway verifies the bearer token against the configured issuer/JWKS with `sofuu.crypto.verifyJWT` before owner-scoping local records.
 
+## Project status
+
+Veliora is maintained by a single author. Commits and pushes go directly to
+`main`; pull requests are not accepted. The source is open under the MIT
+license, so forks are welcome, but this repository does not operate a
+contribution or pull-request review workflow.
+
 ## Runtime: Sofuu, on-device
 
 Veliora's application logic is the JavaScript gateway in `backend/sofuu/`. On Android it is bundled into the APK and executed inside the Sofuu SDK (`com.sofuu:sofuu-android:0.2.0`), in the app process. There is no Veliora HTTP server, no API base URL, and no `sofuu` executable in the APK.
@@ -52,19 +59,19 @@ application: the repository ships no Clerk instance, publishable key, secret,
 or domain. See [Auth provider](#auth-provider) to use your own Clerk app or a
 different provider.
 
-Build the reference app with your own Clerk values:
+The app is built and tested as a **signed release**, not a debug variant.
+Configure your Clerk values and release-signing values as described in
+[Signed release build](#signed-release-build), then run:
 
 ```bash
 cd veliora
-./gradlew :app:assembleDebug \
-  -PVELIORA_CLERK_PUBLISHABLE_KEY=pk_test_your_key \
-  -PVELIORA_CLERK_ISSUER=https://clerk.your-domain.example \
-  -PVELIORA_CLERK_JWKS_URL=https://clerk.your-domain.example/.well-known/jwks.json
+./gradlew :app:assembleRelease
 ```
 
-You can also export the same variables. From Android Studio, put them in
-`~/.gradle/gradle.properties` or the run configuration's Gradle arguments. The
-publishable key is public; never put a Clerk secret key (`sk_...`) in the app.
+The installable artifact is
+`app/build/outputs/apk/release/app-release.apk`. Export the values or put them
+in `~/.gradle/gradle.properties`; the publishable key is public, but never put
+a Clerk secret key (`sk_...`) in the app.
 `VELIORA_CLERK_AUTHORIZED_PARTIES` is optional unless your tokens carry an
 `azp` claim. The Google redirect is
 `clerk://<your.applicationId>.callback` and is declared by the Clerk SDK, so no
@@ -119,9 +126,15 @@ application. To use your own Clerk instance:
 2. Enable **Email**; for the reference email flow enable **Email verification
    code** (it does not use magic links). Enable **Google** if you want the
    Google button.
-3. Set `VELIORA_CLERK_PUBLISHABLE_KEY`, `VELIORA_CLERK_ISSUER`, and
-   `VELIORA_CLERK_JWKS_URL` for your own Frontend API. Set
-   `VELIORA_CLERK_AUTHORIZED_PARTIES` if your tokens carry an `azp` claim.
+3. Copy the values from Clerk:
+
+   | Setting | Where it comes from |
+   |---|---|
+   | `VELIORA_CLERK_PUBLISHABLE_KEY` | **Configure → API keys → Publishable key**. Use the `pk_test_...` key for a development instance and `pk_live_...` for production. Never use the secret key (`sk_...`). |
+   | `VELIORA_CLERK_ISSUER` | **Configure → Domains → Frontend API URL** (or the development Frontend API URL). Use the base URL with no trailing slash; it must match the token's `iss` claim. |
+   | `VELIORA_CLERK_JWKS_URL` | Normally `<issuer>/.well-known/jwks.json`. Some dashboard versions also show the JWKS URL directly. Verify it returns JSON with `curl -fsS <url>`. |
+   | `VELIORA_CLERK_AUTHORIZED_PARTIES` | Not a Clerk dashboard value. Comma-separated values for the `azp` claim in your tokens: your web app's origin plus localhost for tests. Native Android tokens may use the application ID, which the app adds automatically. |
+
 4. For a host-side backend process, set `CLERK_ISSUER` / `CLERK_JWKS_URL` to
    the same values. The Android build passes its values into the embedded
    gateway automatically.
@@ -154,7 +167,7 @@ client supplies its version and platform to the in-process gateway; the
 `/v1/me` route remains available inside the embedded gateway. A different auth
 provider can populate the same subject/claim shape.
 
-### Production build
+### Signed release build
 
 Create a release keystore and read its fingerprint:
 
@@ -183,8 +196,19 @@ export VELIORA_RELEASE_KEY_PASSWORD=...
 export VELIORA_CLERK_PUBLISHABLE_KEY=pk_live_your_key
 export VELIORA_CLERK_ISSUER=https://clerk.your-domain.example
 export VELIORA_CLERK_JWKS_URL=https://clerk.your-domain.example/.well-known/jwks.json
-./gradlew :app:bundleRelease
+./gradlew :app:assembleRelease   # signed APK for device testing
+./gradlew :app:bundleRelease     # AAB for Play
 ```
+
+Install the signed APK with:
+
+```bash
+adb install -r veliora/app/build/outputs/apk/release/app-release.apk
+```
+
+If any `VELIORA_RELEASE_*` value is missing, Gradle still produces an
+**unsigned** release APK that Android will not install. There is no debug-build
+fallback in this workflow.
 
 No backend host or `adb reverse` is required: the gateway, storage, and
 pipeline run inside the APK on the device. Your auth provider and any other
@@ -221,14 +245,31 @@ No maintainer Clerk host, key, or instance is defaulted. If you replace the
 adapter, these `VELIORA_CLERK_*` settings are replaced by your provider's
 configuration.
 
+Inference settings can also be changed in the app's **Settings** tab. It supports:
+
+- Scripted, Cloud, and Local inference modes.
+- Saved model connections (name, provider, model, base URL, API key), with
+  Android-Keystore-encrypted API keys.
+- Web search engine selection (DuckDuckGo, Brave, Tavily) and API keys.
+- HTTP MCP tool servers. Android cannot run stdio MCP processes, so only
+  Streamable HTTP servers are supported.
+- An experimental "use tools during investigations" mode that runs departments
+  as Sofuu agents so they can use web and MCP tools.
+- Pipeline step delay and scripted-fallback controls.
+
+Connection/integration edits persist immediately. Runtime settings apply after
+you close and reopen the app; web-search settings apply right away. Local mode
+expects an OpenAI-compatible server (for example Ollama or llama.cpp);
+on-device GGUF inference is not wired into the investigation loop yet.
+
 The host-side reference service (`make run`) still reads
 `backend/sofuu/veliora.json` and the `CLERK_*` / `VELIORA_*` environment
 variables in `.env.example`. The Android app stores QTSQ data under its
 private `filesDir/sofuu/veliora-store`; local inference is offline after the
 model file is provisioned.
 
-For on-device provider inference, provision the key into the app's private
-storage rather than the APK:
+As a fallback, provider keys can also be provisioned into the app's private
+storage rather than entered in the Settings tab:
 
 ```text
 files/sofuu/provider-keys.json

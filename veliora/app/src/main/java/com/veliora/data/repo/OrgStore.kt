@@ -1,12 +1,16 @@
 package com.veliora.data.repo
 
+import android.util.Log
 import com.veliora.data.DepartmentStatus
 import com.veliora.data.Investigation
 import com.veliora.data.Organization
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -32,7 +36,13 @@ import kotlinx.coroutines.launch
 class OrgStore(
     private val repository: VelioraRepository,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Mapping or DTO-shape changes must degrade to the error state, never
+    // kill the process from a background coroutine.
+    private val crashGuard = CoroutineExceptionHandler { _, throwable ->
+        Log.e("VelioraOrgStore", "Uncaught store coroutine failure", throwable)
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + crashGuard)
     private val lock = Any()
 
     private val _organization = MutableStateFlow<Organization?>(null)
@@ -54,6 +64,12 @@ class OrgStore(
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
     @Volatile private var currentOrgId: String? = null
+
+    /**
+     * Latest snapshot per organization. Switching back to a recently opened
+     * org renders from this cache immediately, then refreshes in place.
+     */
+    private val orgSnapshots = mutableMapOf<String, Organization>()
 
     /** The organization currently loaded by the live screens, if any. */
     val activeOrgId: String?
@@ -78,12 +94,15 @@ class OrgStore(
                 pollJob?.cancel()
                 loadJob = null
                 pollJob = null
-                _organization.value = null
+                // Stale-while-revalidate: a previously loaded org renders
+                // immediately; a new org waits for its first snapshot.
+                val cached = orgSnapshots[orgId]
+                _organization.value = cached
                 _investigations.value = emptyList()
                 _departmentStatuses.value = emptyList()
                 _error.value = null
                 _actionError.value = null
-                _loading.value = false
+                _loading.value = cached == null
                 load = true
                 poll = true
             } else {
@@ -127,16 +146,25 @@ class OrgStore(
     private fun startLoad(orgId: String) {
         synchronized(lock) {
             loadJob?.cancel()
-            _loading.value = true
+            if (_organization.value == null) _loading.value = true
             _error.value = null
             loadJob = scope.launch {
                 try {
-                    val snap = repository.organization(orgId)
-                    val investigations = repository.investigations(orgId)
-                    if (currentOrgId == orgId) {
-                        _organization.value = Mapper.toOrganization(snap, snap.dna)
-                        _investigations.value = investigations.map { Mapper.toInvestigation(it) }
-                        _error.value = null
+                    coroutineScope {
+                        val snapshot = async { repository.organization(orgId) }
+                        val investigations = async { repository.investigations(orgId) }
+
+                        val snap = snapshot.await()
+                        if (currentOrgId == orgId) {
+                            val org = Mapper.toOrganization(snap, snap.dna)
+                            orgSnapshots[orgId] = org
+                            _organization.value = org
+                            _error.value = null
+                        }
+                        val loaded = investigations.await()
+                        if (currentOrgId == orgId) {
+                            _investigations.value = loaded.map { Mapper.toInvestigation(it) }
+                        }
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -162,7 +190,7 @@ class OrgStore(
         var statusTick = 0
         while (currentCoroutineContext().isActive && currentOrgId == orgId) {
             val active = _investigations.value.any { !it.isTerminal }
-            delay(if (active) 250 else 2_000)
+            delay(if (active) 250 else 5_000)
             if (currentOrgId != orgId) break
 
             // Drain one bounded slice of the runtime loop so scripted or
@@ -170,33 +198,33 @@ class OrgStore(
             // idle. Idle organizations only need an occasional refresh.
             if (active) runCatching { repository.pump() }
 
-            runCatching { repository.organization(orgId) }
-                .onSuccess { snap ->
-                    if (currentOrgId == orgId) {
-                        _organization.value = Mapper.toOrganization(snap, snap.dna)
-                        _error.value = null
-                    }
+            runCatching {
+                val snap = repository.organization(orgId)
+                if (currentOrgId == orgId) {
+                    _organization.value = Mapper.toOrganization(snap, snap.dna)
+                    _error.value = null
                 }
+            }
 
-            runCatching { repository.investigations(orgId) }
-                .onSuccess { list ->
-                    if (currentOrgId == orgId) {
-                        _investigations.value = list.map { Mapper.toInvestigation(it) }
-                        _error.value = null
-                    }
+            runCatching {
+                val list = repository.investigations(orgId)
+                if (currentOrgId == orgId) {
+                    _investigations.value = list.map { Mapper.toInvestigation(it) }
+                    _error.value = null
                 }
+            }
 
             // Active investigations get a status refresh about once a
             // second; idle organizations every four seconds.
             val refreshStatus = if (active) statusTick % 4 == 0 else statusTick % 2 == 0
             statusTick += 1
             if (refreshStatus) {
-                runCatching { repository.organizationStatus(orgId) }
-                    .onSuccess { status ->
-                        if (currentOrgId == orgId) {
-                            applyDepartmentStatuses(Mapper.toDepartmentStatuses(status))
-                        }
+                runCatching {
+                    val status = repository.organizationStatus(orgId)
+                    if (currentOrgId == orgId) {
+                        applyDepartmentStatuses(Mapper.toDepartmentStatuses(status))
                     }
+                }
             }
         }
     }
@@ -260,6 +288,7 @@ class OrgStore(
             loadJob = null
             pollJob?.cancel()
             pollJob = null
+            orgSnapshots.clear()
         }
         _organization.value = null
         _investigations.value = emptyList()

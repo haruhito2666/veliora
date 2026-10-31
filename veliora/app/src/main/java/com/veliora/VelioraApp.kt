@@ -24,6 +24,7 @@ class VelioraApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReporter.install(this)
         if (ClerkConfig.isConfigured()) {
             runCatching { Clerk.initialize(this, ClerkConfig.publishableKey) }
                 .onFailure { Log.e("VelioraApp", "Clerk initialization failed", it) }

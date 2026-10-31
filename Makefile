@@ -25,8 +25,11 @@ embedded-js:
 test-embedded:
 	SOFUU_BIN=$(SOFUU) bash scripts/test_embedded_gateway.sh
 
+# Release-only. Loads the gitignored .env when present so local signing and
+# auth values reach Gradle; exported values and ~/.gradle/gradle.properties
+# still work for builds without a .env.
 build-android:
-	cd veliora && ./gradlew :app:assembleDebug
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; cd veliora && ./gradlew :app:assembleRelease
 
 # Credential guard. Never prints the matched value, only file:line.
 check-secrets:

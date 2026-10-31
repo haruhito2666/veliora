@@ -15,6 +15,7 @@ import com.veliora.data.api.OrgStatus
 import com.veliora.data.api.ReportDto
 import com.veliora.data.api.TemplatesResponse
 import com.veliora.data.sofuu.EmbeddedSofuu
+import android.os.SystemClock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -34,8 +35,17 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
         coerceInputValues = true
     }
 
-    suspend fun organizations(): OrgListResponse =
-        json.decodeFromString(sofuu.request("GET", "/v1/organizations").body)
+    private var cachedOrgs: OrgListResponse? = null
+    private var cachedOrgsAt = 0L
+
+    suspend fun organizations(force: Boolean = false): OrgListResponse {
+        val now = SystemClock.elapsedRealtime()
+        cachedOrgs?.takeIf { !force && now - cachedOrgsAt < ORG_LIST_TTL_MS }?.let { return it }
+        val result = json.decodeFromString<OrgListResponse>(sofuu.request("GET", "/v1/organizations").body)
+        cachedOrgs = result
+        cachedOrgsAt = SystemClock.elapsedRealtime()
+        return result
+    }
 
     suspend fun createOrganization(
         name: String,
@@ -47,9 +57,11 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
             template = template,
             constitution = mission.takeIf { it.isNotBlank() }?.let { ConstitutionDraft(it) },
         )
-        return json.decodeFromString(
+        val result = json.decodeFromString<CreateOrgResponse>(
             sofuu.request("POST", "/v1/organizations", json.encodeToString(request)).body,
         )
+        cachedOrgs = null
+        return result
     }
 
     suspend fun organization(orgId: String): OrgSnapshot =
@@ -118,4 +130,8 @@ class VelioraRepository(private val sofuu: EmbeddedSofuu) {
 
     private fun segment(value: String): String =
         URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+    private companion object {
+        const val ORG_LIST_TTL_MS = 5_000L
+    }
 }

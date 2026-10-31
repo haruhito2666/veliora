@@ -235,7 +235,12 @@ fun HealthRing(
             style = MaterialTheme.typography.labelSmall,
             color = Slate900,
             fontWeight = FontWeight.Bold,
-            fontSize = 13.sp,
+            // Scale with the ring so "100%" keeps clear space from the stroke
+            // at every call site instead of only fitting the 48dp variant.
+            fontSize = (ringSize * 0.23f).sp,
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.Center,
         )
     }
 }

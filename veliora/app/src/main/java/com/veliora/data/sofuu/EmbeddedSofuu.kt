@@ -1,6 +1,8 @@
 package com.veliora.data.sofuu
 
 import android.content.Context
+import android.os.SystemClock
+import android.system.Os
 import com.clerk.api.Clerk
 import com.clerk.api.network.serialization.successOrNull
 import com.clerk.api.session.fetchToken
@@ -49,6 +51,16 @@ class EmbeddedSofuu(private val context: Context) {
     @Volatile
     private var initialized = false
 
+    @Volatile
+    private var cachedToken: String? = null
+
+    @Volatile
+    private var cachedTokenAt = 0L
+
+    private companion object {
+        const val TOKEN_CACHE_MS = 30_000L
+    }
+
     /** Starts the runtime once; safe to call from Application.onCreate(). */
     fun start() = launchStart(force = false)
 
@@ -81,41 +93,71 @@ class EmbeddedSofuu(private val context: Context) {
     }
 
     private suspend fun initialize() {
-        val bundle = withContext(Dispatchers.IO) {
-            context.assets.open("veliora-embedded.js").bufferedReader().use { it.readText() }
+        bridge = createRuntime(loadBundle())
+    }
+
+    private suspend fun loadBundle(): String = withContext(Dispatchers.IO) {
+        context.assets.open("veliora-embedded.js").bufferedReader().use { it.readText() }
+    }
+
+    private suspend fun createRuntime(bundle: String): SofuuBridge = withContext(engine) {
+        val root = File(context.filesDir, "sofuu").apply { mkdirs() }
+        val configRoot = File(root, "config").apply { mkdirs() }
+        val settings = RuntimeSettings.load(context)
+        val providerKeys = readProviderKeys(root)
+        val keyName = when (settings.provider.lowercase()) {
+            "anthropic" -> "anthropic"
+            "local", "ollama", "llamacpp", "llama.cpp", "llama-server" -> null
+            else -> "openai"
+        }
+        if (settings.apiKey.isNotBlank() && keyName != null) {
+            // Sofuu resolves custom OpenAI-compatible providers through
+            // the canonical "openai" key slot, not the provider label.
+            providerKeys.put(keyName, settings.apiKey)
+        }
+        val runtimeConfig = JSONObject()
+            .put("embedded", true)
+            .put("config_root", configRoot.absolutePath)
+            // Agent memory must live in the app's private data directory.
+            // The Sofuu default is <cwd>/.sofuu/brain/brain.qtsq, which is
+            // not writable in an Android app process.
+            .put("brain_path", File(root, "brain.qtsq").absolutePath)
+        if (settings.provider.isNotBlank()) {
+            runtimeConfig.put("provider", settings.provider)
+        }
+        if (settings.model.isNotBlank()) {
+            runtimeConfig.put("model", settings.model)
+        }
+        if (settings.baseUrl.isNotBlank()) {
+            runtimeConfig.put("base_url", settings.baseUrl)
+        }
+        if (providerKeys.length() > 0) {
+            runtimeConfig.put("api_keys", providerKeys)
         }
 
-        withContext(engine) {
-            val root = File(context.filesDir, "sofuu").apply { mkdirs() }
-            val configRoot = File(root, "config").apply { mkdirs() }
-            val providerKeys = readProviderKeys(root)
+        // Sofuu's QTSQ vault derives its key from $HOME/.sofuu/brain.key.
+        // Android does not provide HOME, and the no-HOME fallback is a
+        // process-local random key: data written in one launch cannot be
+        // decrypted by the next. Pin HOME to app-private storage so the key
+        // file is stable across restarts.
+        try {
+            Os.setenv("HOME", context.filesDir.absolutePath, true)
+        } catch (error: Exception) {
+            throw IOException("Could not set HOME for the embedded runtime", error)
+        }
 
-            val runtimeConfig = JSONObject()
-                .put("embedded", true)
-                .put("config_root", configRoot.absolutePath)
-                // Agent memory must live in the app's private data directory.
-                // The Sofuu default is <cwd>/.sofuu/brain/brain.qtsq, which is
-                // not writable in an Android app process.
-                .put("brain_path", File(root, "brain.qtsq").absolutePath)
-            if (BuildConfig.EMBEDDED_PROVIDER.isNotBlank()) {
-                runtimeConfig.put("provider", BuildConfig.EMBEDDED_PROVIDER)
-            }
-            if (BuildConfig.EMBEDDED_MODEL.isNotBlank()) {
-                runtimeConfig.put("model", BuildConfig.EMBEDDED_MODEL)
-            }
-            if (BuildConfig.EMBEDDED_BASE_URL.isNotBlank()) {
-                runtimeConfig.put("base_url", BuildConfig.EMBEDDED_BASE_URL)
-            }
-            if (providerKeys.length() > 0) {
-                runtimeConfig.put("api_keys", providerKeys)
-            }
+        // The Android libcurl has no built-in CA store. Export the
+        // platform anchors before the runtime can create a curl handle;
+        // otherwise Clerk JWKS and every other HTTPS fetch fail TLS
+        // verification.
+        AndroidCaTrust.install(context)
+        RuntimeEnv.applyMcpConfig(context)
+        RuntimeEnv.applyWebSettings(context, settings)
 
-            val runtime = SofuuBridge(runtimeConfig.toString())
-            bridge = runtime
-
+        val runtime = SofuuBridge(runtimeConfig.toString())
+        try {
             val eval = runtime.eval(bundle)
-                ?: throw IOException("Sofuu could not load the Veliora runtime bundle")
-            val evalEnvelope = JSONObject(eval)
+            val evalEnvelope = envelope(eval, "bundle evaluation")
             if (!evalEnvelope.optBoolean("ok")) {
                 val error = evalEnvelope.optJSONObject("error")
                 throw IOException(
@@ -124,36 +166,66 @@ class EmbeddedSofuu(private val context: Context) {
                 )
             }
 
+            // Agent mode is the only path that can call web/MCP tools during
+            // investigations. It is deliberately opt-in and only valid with a
+            // real model connection.
+            val runtimeMode = when {
+                settings.mode == InferenceMode.SCRIPTED -> settings.mode.runtimeMode
+                settings.useAgents -> "agent"
+                else -> settings.mode.runtimeMode
+            }
+
             val config = JSONObject()
                 .put("storePath", File(root, "veliora-store").absolutePath)
-                .put("mode", BuildConfig.EMBEDDED_MODE)
+                .put("mode", runtimeMode)
                 .put("authMode", "clerk")
-                .put("stepDelayMs", BuildConfig.EMBEDDED_STEP_DELAY_MS)
-                .put("provider", BuildConfig.EMBEDDED_PROVIDER)
-                .put("model", BuildConfig.EMBEDDED_MODEL)
-                .put("baseUrl", BuildConfig.EMBEDDED_BASE_URL)
+                .put("stepDelayMs", settings.stepDelayMs)
+                .put("provider", settings.provider)
+                .put("model", settings.model)
+                .put("baseUrl", settings.baseUrl)
                 // A real-inference mode must never silently degrade to the
-                // scripted fixtures: surface provider/agent failures instead.
-                .put("fallbackToScripted", BuildConfig.EMBEDDED_MODE == "scripted")
+                // scripted fixtures unless the user explicitly opts in.
+                .put(
+                    "fallbackToScripted",
+                    settings.fallbackToScripted || settings.mode == InferenceMode.SCRIPTED,
+                )
                 .put("appOrigins", JSONArray().put("http://localhost"))
                 .put(
                     "clerk",
                     JSONObject()
                         .put("issuer", BuildConfig.CLERK_ISSUER)
                         .put("jwksUrl", BuildConfig.CLERK_JWKS_URL)
+                        .put(
+                            "jwksCachePath",
+                            File(root, "jwks-cache.json").absolutePath,
+                        )
                         .put("authorizedParties", authorizedParties()),
                 )
 
             val raw = runtime.call("veliora.init", config.toString())
-                ?: throw IOException("Sofuu returned no initialization result")
-            val envelope = JSONObject(raw)
-            if (!envelope.optBoolean("ok")) {
-                val error = envelope.optJSONObject("error")
+            val initEnvelope = envelope(raw, "initialization")
+            if (!initEnvelope.optBoolean("ok")) {
+                val error = initEnvelope.optJSONObject("error")
                 throw IOException(
                     "Veliora runtime initialization failed: " +
                         (error?.optString("message") ?: "unknown error"),
                 )
             }
+            runtime
+        } catch (error: Exception) {
+            runCatching { runtime.close() }
+            throw error
+        }
+    }
+
+    private fun envelope(raw: String?, what: String): JSONObject {
+        if (raw.isNullOrBlank() || raw == "null") {
+            throw IOException("Sofuu $what returned no JSON envelope")
+        }
+        return try {
+            JSONObject(raw)
+        } catch (error: Exception) {
+            throw IOException("Sofuu $what returned invalid JSON: ${raw.take(200)}", error)
         }
     }
 
@@ -264,13 +336,22 @@ class EmbeddedSofuu(private val context: Context) {
      * provider. This implementation reads the Clerk active session; a fork
      * using another provider replaces this function (and the auth UI) while
      * keeping the gateway contract unchanged.
+     *
+     * Clerk tokens are short-lived, so the cache is intentionally small: it
+     * only removes the per-request fetchToken round trip during bursts of
+     * polling without ever outliving a meaningful refresh window.
      */
     private suspend fun authToken(): String {
+        SystemClock.elapsedRealtime().let { now ->
+            cachedToken?.takeIf { now - cachedTokenAt < TOKEN_CACHE_MS }?.let { return it }
+        }
         val result = Clerk.activeSession?.fetchToken()
         val token = result?.successOrNull()?.jwt
         if (token.isNullOrBlank()) {
             throw IOException("Not signed in. Sign in and try again.")
         }
+        cachedToken = token
+        cachedTokenAt = SystemClock.elapsedRealtime()
         return token
     }
 

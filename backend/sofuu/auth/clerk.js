@@ -59,6 +59,7 @@ export class Authenticator {
     this.jwksAt = 0;
     this.lastRefreshAt = 0;
     this.loading = null;
+    this.cacheLoaded = false;
   }
 
   async initialize() {
@@ -83,6 +84,26 @@ export class Authenticator {
         "veliora auth: CLERK_AUTHORIZED_PARTIES is empty; a token that includes an `azp` claim will be rejected",
       );
     }
+
+    // A cached JWKS makes startup instant on Android: the runtime becomes
+    // ready without waiting on Clerk's network. Signature verification stays
+    // fail-closed; an unknown `kid` forces a real refresh, and the background
+    // refresh below keeps the cache current.
+    if (nonEmpty(this.config.clerk.jwksCachePath)) {
+      const cached = await this._readJwksCache();
+      if (cached) {
+        this.jwks = cached.jwks;
+        this.jwksAt = Date.now();
+        this.cacheLoaded = true;
+        console.log(
+          `veliora auth: clerk mode ready from cached JWKS (issuer=${this.config.clerk.issuer || "unchecked"}, ` +
+            `jwks=${this.config.clerk.jwksUrl}, keys=${(this.jwks.keys || []).length})`,
+        );
+        this._refreshJwksInBackground();
+        return;
+      }
+    }
+
     try {
       await this._ensureJWKS();
       console.log(
@@ -220,13 +241,25 @@ export class Authenticator {
       if (!response || !response.ok) {
         throw new Error(`JWKS request failed with HTTP ${response ? response.status : "?"}`);
       }
-      const data = await response.json();
+      // Sofuu's Response.json() can truncate chunked bodies on Android
+      // ("unexpected data at the end"). Read the full body and parse it
+      // ourselves, matching the runtime's own provider-list workaround.
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        throw new Error(
+          `JWKS response is not valid JSON (${text.length} bytes): ${error.message}`,
+        );
+      }
       if (!data || !Array.isArray(data.keys) || data.keys.length === 0) {
         throw new Error("JWKS response contains no keys");
       }
       this.jwks = data;
       this.jwksAt = Date.now();
       this.lastRefreshAt = this.jwksAt;
+      await this._writeJwksCache(data);
       return data;
     } catch (error) {
       if (this.jwks) {
@@ -244,5 +277,49 @@ export class Authenticator {
     } finally {
       if (timer !== null) clearTimeout(timer);
     }
+  }
+
+  async _readJwksCache() {
+    const path = this.config.clerk.jwksCachePath;
+    if (!nonEmpty(path) || !sofuu.fs || typeof sofuu.fs.readFile !== "function") return null;
+    try {
+      const text = await sofuu.fs.readFile(path, "utf8");
+      const parsed = JSON.parse(text);
+      const jwks = parsed && parsed.jwks;
+      if (!jwks || !Array.isArray(jwks.keys) || jwks.keys.length === 0) return null;
+      // Refuse an ancient cache: it is better to pay the startup fetch than
+      // to keep trying a key set from a previous installation.
+      const savedAt = Number(parsed.saved_at || 0);
+      const maxAgeMs = 7 * 24 * 60 * 60 * 1000;
+      if (!Number.isFinite(savedAt) || Date.now() - savedAt > maxAgeMs) return null;
+      return { jwks, savedAt };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async _writeJwksCache(jwks) {
+    const path = this.config.clerk.jwksCachePath;
+    if (!nonEmpty(path) || !sofuu.fs || typeof sofuu.fs.writeFile !== "function") return;
+    try {
+      await sofuu.fs.writeFile(
+        path,
+        JSON.stringify({ saved_at: Date.now(), jwks }, null, 2),
+        "utf8",
+      );
+    } catch (error) {
+      // The in-memory key set still works; a cache write failure only costs
+      // the next process its startup fetch.
+      console.warn(`veliora auth: could not write the JWKS cache: ${error.message}`);
+    }
+  }
+
+  _refreshJwksInBackground() {
+    // Never awaited: startup is already ready on the cached key set. A
+    // failed refresh keeps the cache and is retried by `_ensureJWKS` when it
+    // goes stale or an unknown `kid` arrives.
+    void this._loadJWKS().catch((error) => {
+      console.warn(`veliora auth: background JWKS refresh failed: ${error.message}`);
+    });
   }
 }

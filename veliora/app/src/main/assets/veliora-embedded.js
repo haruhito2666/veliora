@@ -23,6 +23,9 @@
     clerk: {
       issuer: "",
       jwksUrl: "",
+      // Optional on-disk JWKS cache used by embedded hosts so startup does not
+      // block on Clerk's network. Empty disables the cache.
+      jwksCachePath: "",
       authorizedParties: [
         "http://localhost",
         "http://localhost:3000",
@@ -2171,6 +2174,7 @@
       this.jwksAt = 0;
       this.lastRefreshAt = 0;
       this.loading = null;
+      this.cacheLoaded = false;
     }
     async initialize() {
       if (this.mode === "dev") {
@@ -2191,6 +2195,19 @@
         console.warn(
           "veliora auth: CLERK_AUTHORIZED_PARTIES is empty; a token that includes an `azp` claim will be rejected"
         );
+      }
+      if (nonEmpty(this.config.clerk.jwksCachePath)) {
+        const cached = await this._readJwksCache();
+        if (cached) {
+          this.jwks = cached.jwks;
+          this.jwksAt = Date.now();
+          this.cacheLoaded = true;
+          console.log(
+            `veliora auth: clerk mode ready from cached JWKS (issuer=${this.config.clerk.issuer || "unchecked"}, jwks=${this.config.clerk.jwksUrl}, keys=${(this.jwks.keys || []).length})`
+          );
+          this._refreshJwksInBackground();
+          return;
+        }
       }
       try {
         await this._ensureJWKS();
@@ -2311,13 +2328,22 @@
         if (!response || !response.ok) {
           throw new Error(`JWKS request failed with HTTP ${response ? response.status : "?"}`);
         }
-        const data = await response.json();
+        const text = await response.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (error) {
+          throw new Error(
+            `JWKS response is not valid JSON (${text.length} bytes): ${error.message}`
+          );
+        }
         if (!data || !Array.isArray(data.keys) || data.keys.length === 0) {
           throw new Error("JWKS response contains no keys");
         }
         this.jwks = data;
         this.jwksAt = Date.now();
         this.lastRefreshAt = this.jwksAt;
+        await this._writeJwksCache(data);
         return data;
       } catch (error) {
         if (this.jwks) {
@@ -2335,6 +2361,40 @@
       } finally {
         if (timer !== null) clearTimeout(timer);
       }
+    }
+    async _readJwksCache() {
+      const path = this.config.clerk.jwksCachePath;
+      if (!nonEmpty(path) || !sofuu.fs || typeof sofuu.fs.readFile !== "function") return null;
+      try {
+        const text = await sofuu.fs.readFile(path, "utf8");
+        const parsed = JSON.parse(text);
+        const jwks = parsed && parsed.jwks;
+        if (!jwks || !Array.isArray(jwks.keys) || jwks.keys.length === 0) return null;
+        const savedAt = Number(parsed.saved_at || 0);
+        const maxAgeMs = 7 * 24 * 60 * 60 * 1e3;
+        if (!Number.isFinite(savedAt) || Date.now() - savedAt > maxAgeMs) return null;
+        return { jwks, savedAt };
+      } catch (_) {
+        return null;
+      }
+    }
+    async _writeJwksCache(jwks) {
+      const path = this.config.clerk.jwksCachePath;
+      if (!nonEmpty(path) || !sofuu.fs || typeof sofuu.fs.writeFile !== "function") return;
+      try {
+        await sofuu.fs.writeFile(
+          path,
+          JSON.stringify({ saved_at: Date.now(), jwks }, null, 2),
+          "utf8"
+        );
+      } catch (error) {
+        console.warn(`veliora auth: could not write the JWKS cache: ${error.message}`);
+      }
+    }
+    _refreshJwksInBackground() {
+      void this._loadJWKS().catch((error) => {
+        console.warn(`veliora auth: background JWKS refresh failed: ${error.message}`);
+      });
     }
   };
 

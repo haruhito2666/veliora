@@ -21,6 +21,9 @@ const DEFAULTS = {
   clerk: {
     issuer: "",
     jwksUrl: "",
+    // Optional on-disk JWKS cache used by embedded hosts so startup does not
+    // block on Clerk's network. Empty disables the cache.
+    jwksCachePath: "",
     authorizedParties: [
       "http://localhost",
       "http://localhost:3000",

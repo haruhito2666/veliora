@@ -16,11 +16,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +43,7 @@ import com.veliora.data.api.OrgLite
 import com.veliora.ui.components.EmptyState
 import com.veliora.ui.components.HealthRing
 import com.veliora.ui.components.LivePulse
+import com.veliora.ui.components.OrganizationListSkeleton
 import com.veliora.ui.components.ScrollableHeader
 import com.veliora.ui.components.VelioraCard
 import com.veliora.ui.theme.Indigo500
@@ -71,7 +71,7 @@ fun OrgSelectorScreen(
         loading = true
         error = null
         try {
-            organizations = app.repository.organizations().data
+            organizations = app.repository.organizations(force = true).data
         } catch (e: Exception) {
             error = e.message ?: "Failed to load organizations"
         } finally {
@@ -105,10 +105,10 @@ fun OrgSelectorScreen(
                         }
                         IconButton(onClick = onInstanceClick) {
                             Icon(
-                                imageVector = Icons.Filled.Info,
-                                contentDescription = "Instance information",
+                                imageVector = Icons.Filled.AccountCircle,
+                                contentDescription = "Profile and instance information",
                                 tint = Slate700,
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(28.dp),
                             )
                         }
                     },
@@ -116,12 +116,7 @@ fun OrgSelectorScreen(
             }
             when {
                 loading -> item {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(Spacing.xxl),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        CircularProgressIndicator()
-                    }
+                    OrganizationListSkeleton()
                 }
                 error != null -> item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -137,11 +132,35 @@ fun OrgSelectorScreen(
                     }
                 }
                 organizations.isEmpty() -> item {
-                    EmptyState(
-                        icon = "◌",
-                        title = "No organizations yet",
-                        subtitle = "Create your first organization to begin.",
-                    )
+                    VelioraCard(Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.mdLg),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        ) {
+                            EmptyState(
+                                icon = "◌",
+                                title = "No organizations yet",
+                                subtitle = "Create your first organization to begin.",
+                            )
+                            Text(
+                                "Getting started",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Slate900,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            listOf(
+                                "1. Create a Startup Society.",
+                                "2. Launch an investigation with a goal.",
+                                "3. Watch departments, debates, and the board report.",
+                            ).forEach { step ->
+                                Text(
+                                    step,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Slate500,
+                                )
+                            }
+                        }
+                    }
                 }
                 else -> itemsIndexed(organizations) { _, org ->
                     val isCurrent = org.organizationId == app.orgStore.activeOrgId
@@ -158,7 +177,7 @@ fun OrgSelectorScreen(
                             modifier = Modifier.padding(Spacing.mdLg),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            HealthRing(health = org.health.toInt(), ringSize = 48)
+                            HealthRing(health = org.health.toInt(), ringSize = 56)
                             Spacer(modifier = Modifier.width(Spacing.md))
                             Column(
                                 modifier = Modifier.weight(1f),

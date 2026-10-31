@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +60,7 @@ import com.veliora.ui.components.HealthRing
 import com.veliora.ui.components.InvestigationCard
 import com.veliora.ui.components.LiveOrgEffect
 import com.veliora.ui.components.LivePulse
+import com.veliora.ui.components.HomeSkeleton
 import com.veliora.ui.components.SectionHeader
 import com.veliora.ui.components.TextLink
 import com.veliora.ui.components.VelioraCard
@@ -135,7 +135,7 @@ fun HomeScreen(
             }
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                HomeSkeleton(modifier = Modifier.align(Alignment.Center))
             }
         }
         return

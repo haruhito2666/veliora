@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import com.veliora.ui.screens.investigations.InvestigationsScreen
 import com.veliora.ui.screens.orgselector.OrgSelectorScreen
 import com.veliora.ui.screens.instance.InstanceScreen
 import com.veliora.ui.screens.report.ReportScreen
+import com.veliora.ui.screens.settings.SettingsScreen
 import com.veliora.ui.screens.worker.WorkerDetailScreen
 import kotlinx.coroutines.launch
 
@@ -59,6 +61,7 @@ object Routes {
     const val EVOLUTION = "evolution/{orgId}"
     const val CONSTITUTION = "constitution/{orgId}"
     const val INSTANCE = "instance"
+    const val SETTINGS = "settings"
     const val CREATE_ORG = "create-org"
     const val EVOLUTION_EVENT = "evolution-event/{orgId}/{eventId}"
 
@@ -80,6 +83,7 @@ private val mainNavItems = listOf(
     FloatingNavItem("Home", Icons.Filled.Home, Routes.HOME),
     FloatingNavItem("Investigations", Icons.Filled.Insights, Routes.INVESTIGATIONS),
     FloatingNavItem("Comms", Icons.AutoMirrored.Filled.Send, Routes.COMMS),
+    FloatingNavItem("Settings", Icons.Filled.Settings, Routes.SETTINGS),
 )
 
 // ── Nav Host ──────────────────────────────────────────────────────────
@@ -118,6 +122,15 @@ fun VelioraNavHost(
                     }
                 },
             )
+        }
+
+        composable(Routes.SETTINGS) {
+            MainScaffoldHost(
+                navController = navController,
+                orgId = "",
+            ) { padding ->
+                SettingsScreen(contentPadding = padding)
+            }
         }
 
         // Create Organization
@@ -345,6 +358,7 @@ private fun MainScaffoldHost(
         currentRoute.startsWith("home/") -> Routes.HOME
         currentRoute.startsWith("investigations/") -> Routes.INVESTIGATIONS
         currentRoute.startsWith("comms/") -> Routes.COMMS
+        currentRoute == Routes.SETTINGS -> Routes.SETTINGS
         else -> currentRoute
     }
 

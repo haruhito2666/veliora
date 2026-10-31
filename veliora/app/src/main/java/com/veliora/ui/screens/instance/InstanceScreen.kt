@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -25,6 +25,7 @@ import com.clerk.api.Clerk
 import com.clerk.api.network.serialization.errorMessage
 import com.clerk.api.network.serialization.onFailure
 import com.clerk.api.network.serialization.onSuccess
+import com.veliora.CrashReporter
 import com.veliora.app
 import com.veliora.data.api.OrgLite
 import com.veliora.ui.components.EmptyState
@@ -51,6 +52,7 @@ fun InstanceScreen(
     var sdkCaps by remember { mutableStateOf<JSONObject?>(null) }
     var sdkSelfTest by remember { mutableStateOf<JSONObject?>(null) }
     var sdkError by remember { mutableStateOf<String?>(null) }
+    var lastCrash by remember { mutableStateOf(CrashReporter.last(context)) }
     var reloadKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(reloadKey) {
@@ -61,7 +63,7 @@ fun InstanceScreen(
         sdkAbi = 0
         sdkCaps = null
         sdkSelfTest = null
-        runCatching { app.repository.organizations().data }
+        runCatching { app.repository.organizations(force = true).data }
             .onSuccess { organizations = it }
             .onFailure { error = it.message ?: "Failed to load this instance" }
         runCatching { app.repository.sdkAbiVersion() to app.repository.sdkCapabilities() }
@@ -96,7 +98,7 @@ fun InstanceScreen(
                 VelioraCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(Spacing.mdLg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Info, null, tint = Green500, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Filled.AccountCircle, null, tint = Green500, modifier = Modifier.size(28.dp))
                             Spacer(Modifier.width(Spacing.md))
                             Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                                 Text(
@@ -188,6 +190,34 @@ fun InstanceScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Slate500,
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+            lastCrash?.let { crash ->
+                item {
+                    VelioraCard(Modifier.fillMaxWidth()) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(Spacing.mdLg),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        ) {
+                            Text(
+                                "Last crash",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                crash.lineSequence().take(24).joinToString("\n"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate500,
+                            )
+                            TextButton(onClick = {
+                                CrashReporter.clear(context)
+                                lastCrash = null
+                            }) {
+                                Text("Clear")
                             }
                         }
                     }
